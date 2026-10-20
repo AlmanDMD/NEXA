@@ -1,6 +1,6 @@
 # Diagrama de caso de uso
 
-## Atores
+## Atores 
 
 | Ator | Descrição | Casos de uso |
 |------|-----------|--------------|
