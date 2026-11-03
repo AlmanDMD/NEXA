@@ -1,0 +1,141 @@
+name: NEXA — Sincronização Automática de GitHub Projects (v2)
+
+on:
+  issues:
+    types: [opened, reopened, closed, labeled]
+  pull_request:
+    types: [opened, reopened, closed, labeled]
+
+jobs:
+  sync-projects:
+    name: Sincronizar Item nos Projetos Setoriais e no Projeto Geral
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sincronizar Issue/PR com os 5 GitHub Projects
+        if: env.PROJECT_AUTOMATION_TOKEN != ''
+        env:
+          PROJECT_AUTOMATION_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          ITEM_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+          ITEM_TITLE: ${{ github.event.issue.title || github.event.pull_request.title }}
+          ITEM_STATE: ${{ github.event.issue.state || github.event.pull_request.state }}
+          EVENT_ACTION: ${{ github.event.action }}
+          IS_MERGED: ${{ github.event.pull_request.merged || false }}
+        run: |
+          node -e '
+          const token = process.env.PROJECT_AUTOMATION_TOKEN;
+          const owner = process.env.GITHUB_OWNER;
+          const contentId = process.env.ITEM_NODE_ID;
+          const title = process.env.ITEM_TITLE || "";
+          const state = (process.env.ITEM_STATE || "").toUpperCase();
+          const isClosed = state === "CLOSED" || process.env.IS_MERGED === "true";
+
+          async function gql(query, variables = {}) {
+            const res = await fetch("https://api.github.com/graphql", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ query, variables })
+            });
+            const json = await res.json();
+            if (json.errors) throw new Error(JSON.stringify(json.errors));
+            return json.data;
+          }
+
+          function detectSquad(t) {
+            if (t.startsWith("[FE-")) return { projectTitle: "NEXA – Frontend", squad: "Frontend" };
+            if (t.startsWith("[BE-")) return { projectTitle: "NEXA – Backend", squad: "Backend" };
+            if (t.startsWith("[DB-")) return { projectTitle: "NEXA – Banco de Dados", squad: "Banco de Dados" };
+            if (t.startsWith("[DOC-")) return { projectTitle: "NEXA – Documentação", squad: "Documentação" };
+            return null;
+          }
+
+          async function run() {
+            const data = await gql(`
+              query($owner: String!) {
+                organization(login: $owner) {
+                  projectsV2(first: 30) {
+                    nodes {
+                      id
+                      title
+                      fields(first: 30) {
+                        nodes {
+                          ... on ProjectV2SingleSelectField {
+                            id
+                            name
+                            options { id name }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { owner });
+
+            const projects = data.organization?.projectsV2?.nodes || [];
+            const targetStatus = isClosed ? "DONE" : "BACKLOG";
+            const detected = detectSquad(title);
+
+            async function syncToProject(proj, squadName = null) {
+              if (!proj) return;
+              const addRes = await gql(`
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
+                }
+              `, { projectId: proj.id, contentId });
+              const itemId = addRes.addProjectV2ItemById.item.id;
+
+              const statusField = proj.fields.nodes.find(f => f.name === "Status");
+              const statusOpt = statusField?.options?.find(o => o.name === targetStatus);
+              if (statusField && statusOpt) {
+                await gql(`
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optId: String!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+                      value: { singleSelectOptionId: $optId }
+                    }) { projectV2Item { id } }
+                  }
+                `, { projectId: proj.id, itemId, fieldId: statusField.id, optId: statusOpt.id });
+              }
+
+              if (squadName) {
+                const squadField = proj.fields.nodes.find(f => f.name === "Squad");
+                const squadOpt = squadField?.options?.find(o => o.name === squadName);
+                if (squadField && squadOpt) {
+                  await gql(`
+                    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optId: String!) {
+                      updateProjectV2ItemFieldValue(input: {
+                        projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+                        value: { singleSelectOptionId: $optId }
+                      }) { projectV2Item { id } }
+                    }
+                  `, { projectId: proj.id, itemId, fieldId: squadField.id, optId: squadOpt.id });
+                }
+              }
+            }
+
+            if (detected) {
+              const sectorProj = projects.find(p => p.title === detected.projectTitle);
+              await syncToProject(sectorProj);
+            }
+
+            const generalProj = projects.find(p => p.title === "NEXA – Geral");
+            await syncToProject(generalProj, detected?.squad || null);
+          }
+
+          run().catch(console.error);
+          '
+
