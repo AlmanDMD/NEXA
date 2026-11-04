@@ -1,9 +1,11 @@
 /**
- * Script para atribuir issues da NEXA por membro e/ou por trilha (DB, BE, FE, DOC).
+ * Script para atribuir ou remover atribuição de issues da NEXA por membro e por trilha (DB, BE, FE, DOC).
  * Uso:
- *   node scripts/assign-issues.js <username> [PREFIXO_OPCIONAL]
- * Exemplo:
+ *   node scripts/assign-issues.js <username|NONE> [PREFIXOS_SEPARADOS_POR_VIRGULA]
+ * Exemplos:
+ *   node scripts/assign-issues.js NicolasPureza DB
  *   node scripts/assign-issues.js leticiaVieiratch DOC
+ *   node scripts/assign-issues.js NONE BE,FE
  */
 
 import fs from 'fs';
@@ -49,7 +51,7 @@ async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function getAllIssues(prefixFilter = null) {
+async function getAllIssues(prefixes = null) {
   const all = [];
   let page = 1;
   while (true) {
@@ -63,7 +65,8 @@ async function getAllIssues(prefixFilter = null) {
       if (!item.pull_request) {
         const match = item.title.match(/^\[([A-Z]+)-\d+\]/);
         if (match) {
-          if (!prefixFilter || match[1].toUpperCase() === prefixFilter.toUpperCase()) {
+          const p = match[1].toUpperCase();
+          if (!prefixes || prefixes.includes(p)) {
             all.push(item);
           }
         }
@@ -75,13 +78,18 @@ async function getAllIssues(prefixFilter = null) {
 }
 
 async function setIssueAssignee(issueNumber, title, username) {
+  const assignees = (!username || username.toUpperCase() === 'NONE') ? [] : [username];
   const res = await fetch(`${GITHUB_API}/repos/${OWNER}/${REPO}/issues/${issueNumber}`, {
     method: 'PATCH',
     headers,
-    body: JSON.stringify({ assignees: [username] })
+    body: JSON.stringify({ assignees })
   });
   if (res.ok) {
-    console.log(`   ✅ Issue #${issueNumber} atribuída a @${username} -> ${title}`);
+    if (assignees.length === 0) {
+      console.log(`   🧹 Issue #${issueNumber} sem responsável (limpa) -> ${title}`);
+    } else {
+      console.log(`   ✅ Issue #${issueNumber} atribuída a @${username} -> ${title}`);
+    }
     return true;
   } else {
     console.error(`   ❌ Falha na issue #${issueNumber}: HTTP ${res.status} - ${await res.text()}`);
@@ -90,16 +98,23 @@ async function setIssueAssignee(issueNumber, title, username) {
 }
 
 async function main() {
-  const targetUsername = process.argv[2] || 'leticiaVieiratch';
-  const prefixFilter = process.argv[3] || null;
+  const targetUsername = process.argv[2] || 'NONE';
+  const prefixArg = process.argv[3] || '';
+  const prefixes = prefixArg
+    ? prefixArg.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+    : null;
 
-  console.log(`🎯 Usuário selecionado para atribuição: @${targetUsername}`);
-  if (prefixFilter) {
-    console.log(`📂 Filtro de Squad/Trilha ativo: [${prefixFilter}-*]`);
+  if (targetUsername.toUpperCase() === 'NONE') {
+    console.log('🧹 Modo de limpeza de atribuição (assignees: [])');
+  } else {
+    console.log(`🎯 Usuário selecionado para atribuição: @${targetUsername}`);
+  }
+  if (prefixes) {
+    console.log(`📂 Filtro de Squads ativo: ${prefixes.map(p => `[${p}-*]`).join(', ')}`);
   }
 
-  const issues = await getAllIssues(prefixFilter);
-  console.log(`\n📦 Total de issues encontradas para atribuir: ${issues.length}\n`);
+  const issues = await getAllIssues(prefixes);
+  console.log(`\n📦 Total de issues encontradas para atualizar: ${issues.length}\n`);
 
   const BATCH_SIZE = 5;
   for (let i = 0; i < issues.length; i += BATCH_SIZE) {
@@ -108,7 +123,7 @@ async function main() {
     await sleep(250);
   }
 
-  console.log(`\n🎉 Todas as ${issues.length} issues foram atribuídas com sucesso para @${targetUsername}!`);
+  console.log(`\n🎉 Todas as ${issues.length} issues foram atualizadas com sucesso!`);
 }
 
 main().catch(err => {
