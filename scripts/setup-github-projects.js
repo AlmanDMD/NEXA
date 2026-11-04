@@ -2,12 +2,12 @@
  * Script de Automação para Estruturação dos 5 GitHub Projects (v2) da NEXA
  * no formato idêntico ao template "Plataforma Digital — 2026.2" (UniSENAI-Sorocaba)
  *
- * Popula as 70 issues do repositório AlmanDMD/NEXA nos projetos:
- *  - NEXA – Frontend (#15) -> recebe FE-001 a FE-020
- *  - NEXA – Backend (#16) -> recebe BE-001 a BE-020
- *  - NEXA – Banco de Dados (#17) -> recebe DB-001 a DB-020
- *  - NEXA – Documentação (#18) -> recebe DOC-001 a DOC-010
- *  - NEXA – Geral (#19) -> recebe todas as 70 issues consolidadas
+ * Popula as 170 issues do repositório AlmanDMD/NEXA nos projetos:
+ *  - NEXA – Frontend (#15) -> recebe FE-001 a FE-050 (50 issues)
+ *  - NEXA – Backend (#16) -> recebe BE-001 a BE-050 (50 issues)
+ *  - NEXA – Banco de Dados (#17) -> recebe DB-001 a DB-050 (50 issues)
+ *  - NEXA – Documentação (#18) -> recebe DOC-001 a DOC-020 (20 issues)
+ *  - NEXA – Geral (#19) -> recebe todas as 170 issues consolidadas
  */
 
 import fs from 'fs';
@@ -257,7 +257,22 @@ function parseIssueMetadata(issue) {
 
   const priority = localCard?.priority || 'P0';
   const priorityLabel = `priority:${priority}`;
-  const sprintOption = num <= 10 ? 'S1' : 'S2';
+
+  let sprintOption = 'S1';
+  if (prefix === 'DOC') {
+    if (num <= 5) sprintOption = 'S1';
+    else if (num <= 10) sprintOption = 'S2';
+    else if (num <= 13) sprintOption = 'S3';
+    else if (num <= 16) sprintOption = 'S4';
+    else sprintOption = 'S5';
+  } else {
+    if (num <= 10) sprintOption = 'S1';
+    else if (num <= 20) sprintOption = 'S2';
+    else if (num <= 30) sprintOption = 'S3';
+    else if (num <= 40) sprintOption = 'S4';
+    else sprintOption = 'S5';
+  }
+
   const sizeNumber = localCard?.estimate ? parseInt(localCard.estimate, 10) || 3 : 3;
   const dependencies = localCard?.dependencies || 'Nenhuma';
 
@@ -373,36 +388,34 @@ async function main() {
     projectMap[cfg.key] = { ...cfg, project, fields };
   }
 
-  const issues = await fetchAllRepoIssues();
-  console.log(`\n🔄 Sincronizando todas as ${issues.length} issues existentes da NEXA nos 5 projetos...`);
+  const allIssues = await fetchAllRepoIssues();
+  const forceAll = process.argv.includes('--all');
+  const issues = forceAll ? allIssues : allIssues.filter(iss => iss.number >= 67);
+  console.log(`\n🔄 Sincronizando ${issues.length} issues (de ${allIssues.length} totais) da NEXA nos 5 projetos...`);
 
-  for (let i = 0; i < issues.length; i++) {
-    const issue = issues[i];
-    const meta = parseIssueMetadata(issue);
-    if (!meta) continue;
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < issues.length; i += BATCH_SIZE) {
+    const batch = issues.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(async (issue, idx) => {
+      const meta = parseIssueMetadata(issue);
+      if (!meta) return;
 
-    const newLabels = [
-      meta.priorityLabel,
-      meta.squadLabel,
-      'release:v1.0.0',
-      'type:task'
-    ];
+      const sectorMeta = projectMap[meta.sectorKey];
+      const generalMeta = projectMap.general;
 
-    const sectorMeta = projectMap[meta.sectorKey];
-    const generalMeta = projectMap.general;
+      await Promise.all([
+        sectorMeta ? addItemAndPopulateFields(sectorMeta, issue, meta) : Promise.resolve(),
+        addItemAndPopulateFields(generalMeta, issue, meta)
+      ]);
 
-    await Promise.all([
-      updateIssueLabels(issue.number, newLabels),
-      sectorMeta ? addItemAndPopulateFields(sectorMeta, issue, meta) : Promise.resolve(),
-      addItemAndPopulateFields(generalMeta, issue, meta)
-    ]);
-
-    console.log(
-      `   ✅ [${i + 1}/${issues.length}] Issue #${issue.number} [${meta.cardId}] sincronizada -> ${sectorMeta.title} & NEXA – Geral (Sprint: ${meta.sprintOption}, Squad: ${meta.squadOption})`
-    );
+      console.log(
+        `   ✅ [${i + idx + 1}/${issues.length}] Issue #${issue.number} [${meta.cardId}] sincronizada -> ${sectorMeta.title} & NEXA – Geral (Sprint: ${meta.sprintOption}, Squad: ${meta.squadOption})`
+      );
+    }));
+    await sleep(250);
   }
 
-  console.log('\n🎉 TODAS AS 70 ISSUES DA NEXA FORAM SINCRONIZADAS COM SUCESSO NOS 5 PROJETOS!');
+  console.log('\n🎉 TODAS AS 170 ISSUES DA NEXA FORAM SINCRONIZADAS COM SUCESSO NOS 5 PROJETOS!');
   for (const cfg of PROJECTS_CONFIG) {
     const p = projectMap[cfg.key].project;
     console.log(`🔗 ${p.title.padEnd(24, ' ')} -> ${p.url}`);
