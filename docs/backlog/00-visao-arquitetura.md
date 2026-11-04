@@ -14,9 +14,9 @@ Os sistemas acadêmicos tradicionais limitam-se ao registro estático de notas e
 
 ## 2. Decisões Arquiteturais e Stack Tecnológica
 - **Front-end**: React 19 + TypeScript + Vite + Tailwind CSS v4 + Lucide React + TanStack Query (para cache e gerenciamento de estado de requisições).
-- **Back-end**: Node.js com TypeScript, framework modular (Fastify/Express), arquitetura em camadas (*Controllers -> Services -> Repositories*), validação estrita com Zod.
-- **Banco de Dados**: PostgreSQL 16 com Prisma ORM, migrations incrementais versionadas, seeds realistas industriais.
-- **Segurança & LGPD**: Autenticação JWT com HttpOnly Cookies, RBAC granular (`ADMIN`, `COORDINATOR`, `TEACHER`, `STUDENT`), observações pedagógicas com criptografia/acesso restrito, logs de auditoria para ações sensíveis.
+- **Back-end**: Python 3.12+ com FastAPI, servidor ASGI Uvicorn, arquitetura em camadas (*Routers -> Services/Use Cases -> Repositories/CRUD -> Models*), validação estrita com Pydantic v2, ORM SQLAlchemy 2.0 assíncrono com Alembic e suíte de testes com Pytest.
+- **Banco de Dados**: PostgreSQL 16, modelagem relacional normalizada (3FN), migrations incrementais versionadas, seeds realistas industriais.
+- **Segurança & LGPD**: Autenticação JWT com HttpOnly Cookies, RBAC granular (`ADMIN`, `COORDINATOR`, `TEACHER`, `STUDENT`), observações pedagógicas com criptografia AES-256 (módulo Cryptography)/acesso restrito, logs de auditoria para ações sensíveis.
 
 ---
 

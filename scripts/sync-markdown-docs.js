@@ -96,14 +96,14 @@ const files = [
   },
   {
     filename: '02-back-end.md',
-    title: '⚙️ Backlog de Back-end (API & Serviços) — Projeto NEXA',
-    subtitle: '50 Cards Exclusivos e Encadeados de Engenharia de Back-end (`BE-001` a `BE-050`)',
-    intro: 'Este documento contém o planejamento completo e 100% interligado da API RESTful e regras de negócio do **Sistema Inteligente de Monitoramento do Desempenho Acadêmico — SENAI (NEXA)**, conectando cada serviço às tabelas do Banco de Dados (`DB-001`..`DB-050`) e servindo o Front-end (`FE-001`..`FE-050`).',
-    lotsSummary: `- **Lote 1 / Sprint 1 (BE-001 a BE-010)**: Setup Node.js/TypeScript, Arquitetura em Camadas, Autenticação JWT + Refresh Token, RBAC e Auditoria.
-- **Lote 2 / Sprint 2 (BE-011 a BE-020)**: APIs de Gestão Acadêmica SENAI (Cursos, Turmas, Disciplinas, Módulos, Matriz de Competências e Matrículas em Lote).
-- **Lote 3 / Sprint 3 (BE-021 a BE-030)**: APIs de Diário de Classe, Chamada em Lote, Tarefas Práticas de Oficina, Rubricas e Motor de Cálculo de Médias.
-- **Lote 4 / Sprint 4 (BE-031 a BE-040)**: APIs de Autoavaliação, Cruzamento Percepção vs. Evidência, Motor de Alertas Precoces e Endpoints de Dashboard 360°.
-- **Lote 5 / Sprint 5 (BE-041 a BE-050)**: Mural de Avisos, Canal Confidencial de Ajuda, Criptografia AES-256-GCM de Notas Pedagógicas, Gamificação, Relatórios PDF/CSV e Suite E2E Final.`,
+    title: '⚙️ Backlog de Back-end (API & Serviços em Python / FastAPI) — Projeto NEXA',
+    subtitle: '50 Cards Exclusivos e Encadeados de Engenharia de Back-end em Python (`BE-001` a `BE-050`)',
+    intro: 'Este documento contém o planejamento completo e 100% interligado da API RESTful assíncrona desenvolvida em **Python 3.12+ com FastAPI, Pydantic v2 e SQLAlchemy 2.0** do **Sistema Inteligente de Monitoramento do Desempenho Acadêmico — SENAI (NEXA)**, conectando cada serviço ao PostgreSQL (`DB-001`..`DB-050`) e servindo a interface Front-end (`FE-001`..`FE-050`).',
+    lotsSummary: `- **Lote 1 / Sprint 1 (BE-001 a BE-010)**: Setup Python 3.12+/FastAPI/Uvicorn, Arquitetura em Camadas, Schemas Pydantic v2, Autenticação JWT (PyJWT), Injeção de Dependências (Depends) e RBAC.
+- **Lote 2 / Sprint 2 (BE-011 a BE-020)**: APIs de Gestão Acadêmica SENAI (Cursos, Turmas, Disciplinas, Módulos, Matriz de Competências e Matrículas em Lote com SQLAlchemy assíncrono).
+- **Lote 3 / Sprint 3 (BE-021 a BE-030)**: APIs de Diário de Classe, Chamada em Lote, Tarefas Práticas de Oficina, Rubricas e Motor de Cálculo de Médias Ponderadas.
+- **Lote 4 / Sprint 4 (BE-031 a BE-040)**: APIs de Autoavaliação, Cruzamento Percepção vs. Evidência Prática, Motor Explicável de Alertas Precoces e Endpoints de Dashboard 360°.
+- **Lote 5 / Sprint 5 (BE-041 a BE-050)**: Mural de Avisos, Canal Confidencial de Ajuda, Criptografia AES-256 (Cryptography) de Notas Pedagógicas, Gamificação, Exportação CSV/PDF e Swagger/OpenAPI Nativo.`,
     cards: backendCards
   },
   {
