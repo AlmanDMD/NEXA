@@ -1,6 +1,6 @@
 // =============================================================================
 // PROJETO NEXA — SISTEMA INTELIGENTE DE MONITORAMENTO ACADÊMICO SENAI
-// CARDS: [DB-004] e [DB-005] Enumerações Globais de Sistema (PostgreSQL 16)
+// CARDS: [DB-004] a [DB-009] Identidade, Perfis, Sessões e Auditoria (Lote 1)
 // =============================================================================
 // Convenção adotada:
 // - Modelos e Enums em PascalCase na camada de aplicação
@@ -200,10 +200,10 @@ enum NoteCategory {
 }
 
 // =============================================================================
-// 3. CONTROLE DE VERSIONAMENTO DE MIGRATIONS SQL (DB-004)
+// 3. TABELAS DE IDENTIDADE, PERFIS, SESSÕES E AUDITORIA (DB-004..DB-009)
 // =============================================================================
 
-/// Tabela de controle de versionamento de migrations SQL aplicadas no PostgreSQL 16
+/// Tabela de controle de versionamento de migrations SQL aplicadas no PostgreSQL 16 (DB-004)
 model SchemaMigration {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
   version         String   @unique @map("version") @db.VarChar(100)
@@ -214,4 +214,77 @@ model SchemaMigration {
   appliedAt       DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
 
   @@map("schema_migrations")
+}
+
+/// Entidade central de autenticação do sistema com proteção de credenciais (DB-006)
+model User {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  email        String        @unique(map: "uq_users_email") @map("email") @db.VarChar(255)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  role         Role          @default(STUDENT) @map("role")
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  profile      UserProfile?
+  sessions     AuthSession[]
+  auditLogs    AuditLog[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([role, isActive], map: "idx_users_role_is_active")
+  @@map("users")
+}
+
+/// Perfil institucional e dados pessoais isolados 1:1 para minimização LGPD (DB-007)
+model UserProfile {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  userId             String   @unique(map: "uq_user_profiles_user_id") @map("user_id") @db.Uuid
+  fullName           String   @map("full_name") @db.VarChar(150)
+  registrationNumber String   @unique(map: "uq_user_profiles_registration_number") @map("registration_number") @db.VarChar(50)
+  phone              String?  @map("phone") @db.VarChar(25)
+  avatarUrl          String?  @map("avatar_url") @db.VarChar(500)
+  bio                String?  @map("bio") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_user_profiles_user")
+
+  @@index([registrationNumber], map: "idx_user_profiles_registration_number")
+  @@index([fullName], map: "idx_user_profiles_full_name")
+  @@map("user_profiles")
+}
+
+/// Sessões ativas e Refresh Tokens com revogação imediata e hash SHA-256 (DB-008)
+model AuthSession {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  refreshTokenHash String   @unique(map: "uq_auth_sessions_token_hash") @map("refresh_token_hash") @db.VarChar(255)
+  userAgent        String?  @map("user_agent") @db.VarChar(500)
+  ipAddress        String?  @map("ip_address") @db.VarChar(45)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+  isRevoked        Boolean  @default(false) @map("is_revoked")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_auth_sessions_user")
+
+  @@index([refreshTokenHash], map: "idx_auth_sessions_refresh_token_hash")
+  @@index([isRevoked], map: "idx_auth_sessions_is_revoked")
+  @@index([userId, isRevoked, expiresAt], map: "idx_auth_sessions_user_revoked_expires")
+  @@map("auth_sessions")
+}
+
+/// Registro imutável de atividades críticas e trilha de auditoria LGPD em JSONB (DB-009)
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @map("action") @db.VarChar(100)
+  entity    String   @map("entity") @db.VarChar(100)
+  entityId  String   @map("entity_id") @db.VarChar(100)
+  oldValues Json?    @map("old_values") @db.JsonB
+  newValues Json?    @map("new_values") @db.JsonB
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_audit_logs_user")
+
+  @@index([createdAt(sort: Desc)], map: "idx_audit_logs_created_at")
+  @@index([entity, entityId], map: "idx_audit_logs_entity_reference")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_audit_logs_user_created_at")
+  @@map("audit_logs")
 }
