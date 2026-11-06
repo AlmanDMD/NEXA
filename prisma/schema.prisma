@@ -1,0 +1,290 @@
+// =============================================================================
+// PROJETO NEXA — SISTEMA INTELIGENTE DE MONITORAMENTO ACADÊMICO SENAI
+// CARDS: [DB-004] a [DB-009] Identidade, Perfis, Sessões e Auditoria (Lote 1)
+// =============================================================================
+// Convenção adotada:
+// - Modelos e Enums em PascalCase na camada de aplicação
+// - Mapeamento explícito para snake_case no PostgreSQL 16 via @map e @@map
+// - Todas as migrations físicas são arquivos SQL puros versionados e executados
+//   no container Docker PostgreSQL 16 (postgres:16-alpine).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// 1. ENUMERAÇÕES GLOBAIS PRIMÁRIAS DE SISTEMA (DB-005)
+// =============================================================================
+
+/// Papéis de controle de acesso baseado em função (RBAC — EPIC-01 / BE-009)
+enum Role {
+  ADMIN
+  COORDINATOR
+  TEACHER
+  STUDENT
+
+  @@map("user_role_enum")
+}
+
+/// Estados do ciclo de vida da matrícula acadêmica do estudante (EPIC-02)
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+  SUSPENDED
+
+  @@map("enrollment_status_enum")
+}
+
+/// Graus de risco acadêmico precoce e explicável (EPIC-05 / DB-034)
+enum RiskLevel {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+
+  @@map("risk_level_enum")
+}
+
+/// Estados de entrega e avaliação de tarefas práticas de oficina (EPIC-04 / DB-025)
+enum SubmissionStatus {
+  PENDING
+  SUBMITTED
+  EVALUATED
+  LATE
+
+  @@map("submission_status_enum")
+}
+
+/// Estados de atendimento das solicitações confidenciais de apoio (EPIC-08 / DB-042)
+enum HelpRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+
+  @@map("help_request_status_enum")
+}
+
+// =============================================================================
+// 2. ENUMERAÇÕES COMPLEMENTARES DE DOMÍNIO ACADÊMICO SENAI (DB-005..DB-050)
+// =============================================================================
+
+/// Turnos de funcionamento das turmas SENAI (DB-012)
+enum Shift {
+  MORNING
+  AFTERNOON
+  NIGHT
+
+  @@map("shift_enum")
+}
+
+/// Estados do período letivo da turma (DB-012 / DB-029)
+enum ClassStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+
+  @@map("class_status_enum")
+}
+
+/// Categorias da taxonomia de competências técnicas SENAI (DB-015)
+enum CompetencyCategory {
+  TECHNICAL
+  SAFETY
+  PROCEDURAL
+
+  @@map("competency_category_enum")
+}
+
+/// Status de presença na chamada rápida de aula (DB-022)
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  JUSTIFIED
+
+  @@map("attendance_status_enum")
+}
+
+/// Tipos de avaliação formativa e somativa (DB-027)
+enum AssessmentType {
+  EXAM
+  MICRO_EVALUATION
+  PROJECT
+
+  @@map("assessment_type_enum")
+}
+
+/// Categorias de disparo de alertas acadêmicos explicáveis (DB-034)
+enum AlertCategory {
+  ATTENDANCE
+  GRADE_DROP
+  PENDING_TASKS
+  SELF_EVAL_GAP
+
+  @@map("alert_category_enum")
+}
+
+/// Estados de tratamento de alertas acadêmicos pelo professor/coordenação (DB-034)
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+
+  @@map("alert_status_enum")
+}
+
+/// Classificação do diagnóstico comparativo Autoavaliação vs. Professor (DB-035)
+enum DiagnosticType {
+  ALIGNED
+  OVERCONFIDENCE_RISK
+  UNDERCONFIDENCE_SUPPORT
+  INSUFFICIENT_EVIDENCE
+
+  @@map("diagnostic_type_enum")
+}
+
+/// Marcos positivos na linha do tempo de autonomia do estudante (DB-039)
+enum MilestoneType {
+  MODULE_COMPLETED
+  SKILL_LEVEL_UP
+  PERFECT_ATTENDANCE
+  RECOVERY_ACHIEVED
+
+  @@map("milestone_type_enum")
+}
+
+/// Prioridade de avisos no mural oficial da turma (DB-041)
+enum AnnouncementPriority {
+  NORMAL
+  IMPORTANT
+  URGENT
+
+  @@map("announcement_priority_enum")
+}
+
+/// Categorias de solicitações confidenciais de apoio pedagógico (DB-042)
+enum HelpRequestCategory {
+  TECHNICAL_DOUBT
+  PRACTICAL_DIFFICULTY
+  PERSONAL_PEDAGOGICAL
+
+  @@map("help_request_category_enum")
+}
+
+/// Escopos de visibilidade restrita para observações pedagógicas sigilosas (DB-043)
+enum NoteVisibilityScope {
+  PRIVATE_AUTHOR
+  TEACHERS_AND_COORD
+  COORDINATION_ONLY
+
+  @@map("note_visibility_scope_enum")
+}
+
+/// Categorias de observações pedagógicas restritas (DB-043)
+enum NoteCategory {
+  INTERVENTION
+  MENTORING
+  BEHAVIORAL
+  ACCOMMODATION
+
+  @@map("note_category_enum")
+}
+
+// =============================================================================
+// 3. TABELAS DE IDENTIDADE, PERFIS, SESSÕES E AUDITORIA (DB-004..DB-009)
+// =============================================================================
+
+/// Tabela de controle de versionamento de migrations SQL aplicadas no PostgreSQL 16 (DB-004)
+model SchemaMigration {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  version         String   @unique @map("version") @db.VarChar(100)
+  migrationName   String   @map("migration_name") @db.VarChar(255)
+  checksumSha256  String   @map("checksum_sha256") @db.VarChar(64)
+  executionTimeMs Int      @default(0) @map("execution_time_ms")
+  appliedBy       String   @default("docker-sql-runner") @map("applied_by") @db.VarChar(100)
+  appliedAt       DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
+
+  @@map("schema_migrations")
+}
+
+/// Entidade central de autenticação do sistema com proteção de credenciais (DB-006)
+model User {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  email        String        @unique(map: "uq_users_email") @map("email") @db.VarChar(255)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  role         Role          @default(STUDENT) @map("role")
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  profile      UserProfile?
+  sessions     AuthSession[]
+  auditLogs    AuditLog[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([role, isActive], map: "idx_users_role_is_active")
+  @@map("users")
+}
+
+/// Perfil institucional e dados pessoais isolados 1:1 para minimização LGPD (DB-007)
+model UserProfile {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  userId             String   @unique(map: "uq_user_profiles_user_id") @map("user_id") @db.Uuid
+  fullName           String   @map("full_name") @db.VarChar(150)
+  registrationNumber String   @unique(map: "uq_user_profiles_registration_number") @map("registration_number") @db.VarChar(50)
+  phone              String?  @map("phone") @db.VarChar(25)
+  avatarUrl          String?  @map("avatar_url") @db.VarChar(500)
+  bio                String?  @map("bio") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_user_profiles_user")
+
+  @@index([registrationNumber], map: "idx_user_profiles_registration_number")
+  @@index([fullName], map: "idx_user_profiles_full_name")
+  @@map("user_profiles")
+}
+
+/// Sessões ativas e Refresh Tokens com revogação imediata e hash SHA-256 (DB-008)
+model AuthSession {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  refreshTokenHash String   @unique(map: "uq_auth_sessions_token_hash") @map("refresh_token_hash") @db.VarChar(255)
+  userAgent        String?  @map("user_agent") @db.VarChar(500)
+  ipAddress        String?  @map("ip_address") @db.VarChar(45)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(6)
+  isRevoked        Boolean  @default(false) @map("is_revoked")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_auth_sessions_user")
+
+  @@index([refreshTokenHash], map: "idx_auth_sessions_refresh_token_hash")
+  @@index([isRevoked], map: "idx_auth_sessions_is_revoked")
+  @@index([userId, isRevoked, expiresAt], map: "idx_auth_sessions_user_revoked_expires")
+  @@map("auth_sessions")
+}
+
+/// Registro imutável de atividades críticas e trilha de auditoria LGPD em JSONB (DB-009)
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @map("action") @db.VarChar(100)
+  entity    String   @map("entity") @db.VarChar(100)
+  entityId  String   @map("entity_id") @db.VarChar(100)
+  oldValues Json?    @map("old_values") @db.JsonB
+  newValues Json?    @map("new_values") @db.JsonB
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_audit_logs_user")
+
+  @@index([createdAt(sort: Desc)], map: "idx_audit_logs_created_at")
+  @@index([entity, entityId], map: "idx_audit_logs_entity_reference")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_audit_logs_user_created_at")
+  @@map("audit_logs")
+}

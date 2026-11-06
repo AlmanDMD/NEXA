@@ -1,0 +1,18 @@
+{
+  "name": "nexa-senai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema Inteligente de Monitoramento do Desempenho Acadêmico — SENAI (NEXA)",
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose stop",
+    "db:logs": "docker compose logs -f postgres",
+    "db:migrate": "node scripts/db-migrate.js",
+    "db:generate": "node scripts/db-generate.js",
+    "db:check": "node prisma/check-connection.ts",
+    "db:validate": "node scripts/validate-db-001.js && node scripts/validate-db-002.js && node scripts/validate-db-003.js && node scripts/validate-db-004.js && node scripts/validate-db-005.js && node scripts/validate-db-006.js && node scripts/validate-db-007.js && node scripts/validate-db-008.js && node scripts/validate-db-009.js && node scripts/validate-db-010.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

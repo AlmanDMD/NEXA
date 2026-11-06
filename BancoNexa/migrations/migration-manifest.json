@@ -1,0 +1,271 @@
+{
+  "project": "NEXA — Sistema Inteligente de Monitoramento Acadêmico SENAI",
+  "databaseEngine": "PostgreSQL 16 Alpine (Docker)",
+  "namingConvention": "snake_case (Database) / camelCase (@map Application)",
+  "schemaSha256": "0dfca7baf76d44379d2fc42abaff900742102fbdaaf5bd57518b3c6b1cb288fe",
+  "logicalModel3fnSha256": "170316f66191880455b86339fba0c2066abf06ca389b67aba44fa8e9b155ac73",
+  "totalTables3fn": 33,
+  "totalEnums": 18,
+  "tables": [
+    "users",
+    "user_profiles",
+    "auth_sessions",
+    "audit_logs",
+    "courses",
+    "classes",
+    "subjects",
+    "learning_modules",
+    "competencies",
+    "module_competencies",
+    "enrollments",
+    "student_subjects",
+    "teacher_assignments",
+    "class_lessons",
+    "attendance_records",
+    "academic_assessments",
+    "student_grades",
+    "practical_tasks",
+    "task_criteria",
+    "task_submissions",
+    "submission_evaluations",
+    "self_assessment_forms",
+    "student_self_assessments",
+    "skill_evidences",
+    "academic_alerts",
+    "explainable_diagnostics",
+    "student_milestone_history",
+    "class_announcements",
+    "help_requests",
+    "pedagogical_notes",
+    "chat_messages",
+    "gamification_badges",
+    "student_achievements"
+  ],
+  "enums": [
+    {
+      "name": "Role",
+      "pgTypeName": "user_role_enum",
+      "values": [
+        "ADMIN",
+        "COORDINATOR",
+        "TEACHER",
+        "STUDENT"
+      ]
+    },
+    {
+      "name": "EnrollmentStatus",
+      "pgTypeName": "enrollment_status_enum",
+      "values": [
+        "ACTIVE",
+        "COMPLETED",
+        "DROPPED",
+        "SUSPENDED"
+      ]
+    },
+    {
+      "name": "RiskLevel",
+      "pgTypeName": "risk_level_enum",
+      "values": [
+        "LOW",
+        "MODERATE",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    {
+      "name": "SubmissionStatus",
+      "pgTypeName": "submission_status_enum",
+      "values": [
+        "PENDING",
+        "SUBMITTED",
+        "EVALUATED",
+        "LATE"
+      ]
+    },
+    {
+      "name": "HelpRequestStatus",
+      "pgTypeName": "help_request_status_enum",
+      "values": [
+        "OPEN",
+        "IN_PROGRESS",
+        "RESOLVED",
+        "CLOSED"
+      ]
+    },
+    {
+      "name": "Shift",
+      "pgTypeName": "shift_enum",
+      "values": [
+        "MORNING",
+        "AFTERNOON",
+        "NIGHT"
+      ]
+    },
+    {
+      "name": "ClassStatus",
+      "pgTypeName": "class_status_enum",
+      "values": [
+        "PLANNING",
+        "ACTIVE",
+        "COMPLETED",
+        "ARCHIVED"
+      ]
+    },
+    {
+      "name": "CompetencyCategory",
+      "pgTypeName": "competency_category_enum",
+      "values": [
+        "TECHNICAL",
+        "SAFETY",
+        "PROCEDURAL"
+      ]
+    },
+    {
+      "name": "AttendanceStatus",
+      "pgTypeName": "attendance_status_enum",
+      "values": [
+        "PRESENT",
+        "ABSENT",
+        "LATE",
+        "JUSTIFIED"
+      ]
+    },
+    {
+      "name": "AssessmentType",
+      "pgTypeName": "assessment_type_enum",
+      "values": [
+        "EXAM",
+        "MICRO_EVALUATION",
+        "PROJECT"
+      ]
+    },
+    {
+      "name": "AlertCategory",
+      "pgTypeName": "alert_category_enum",
+      "values": [
+        "ATTENDANCE",
+        "GRADE_DROP",
+        "PENDING_TASKS",
+        "SELF_EVAL_GAP"
+      ]
+    },
+    {
+      "name": "AlertStatus",
+      "pgTypeName": "alert_status_enum",
+      "values": [
+        "ACTIVE",
+        "ACKNOWLEDGED",
+        "RESOLVED"
+      ]
+    },
+    {
+      "name": "DiagnosticType",
+      "pgTypeName": "diagnostic_type_enum",
+      "values": [
+        "ALIGNED",
+        "OVERCONFIDENCE_RISK",
+        "UNDERCONFIDENCE_SUPPORT",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "name": "MilestoneType",
+      "pgTypeName": "milestone_type_enum",
+      "values": [
+        "MODULE_COMPLETED",
+        "SKILL_LEVEL_UP",
+        "PERFECT_ATTENDANCE",
+        "RECOVERY_ACHIEVED"
+      ]
+    },
+    {
+      "name": "AnnouncementPriority",
+      "pgTypeName": "announcement_priority_enum",
+      "values": [
+        "NORMAL",
+        "IMPORTANT",
+        "URGENT"
+      ]
+    },
+    {
+      "name": "HelpRequestCategory",
+      "pgTypeName": "help_request_category_enum",
+      "values": [
+        "TECHNICAL_DOUBT",
+        "PRACTICAL_DIFFICULTY",
+        "PERSONAL_PEDAGOGICAL"
+      ]
+    },
+    {
+      "name": "NoteVisibilityScope",
+      "pgTypeName": "note_visibility_scope_enum",
+      "values": [
+        "PRIVATE_AUTHOR",
+        "TEACHERS_AND_COORD",
+        "COORDINATION_ONLY"
+      ]
+    },
+    {
+      "name": "NoteCategory",
+      "pgTypeName": "note_category_enum",
+      "values": [
+        "INTERVENTION",
+        "MENTORING",
+        "BEHAVIORAL",
+        "ACCOMMODATION"
+      ]
+    }
+  ],
+  "sqlEnumTypes": [
+    "user_role_enum",
+    "shift_enum",
+    "class_status_enum",
+    "enrollment_status_enum",
+    "competency_category_enum",
+    "attendance_status_enum",
+    "submission_status_enum",
+    "assessment_type_enum",
+    "risk_level_enum",
+    "alert_category_enum",
+    "alert_status_enum",
+    "diagnostic_type_enum",
+    "milestone_type_enum",
+    "announcement_priority_enum",
+    "help_request_category_enum",
+    "help_request_status_enum",
+    "note_visibility_scope_enum",
+    "note_category_enum"
+  ],
+  "migrations": [
+    {
+      "id": "20261104000000_init_migration_control",
+      "checksumSha256": "26d09637b74101467b89f6c4cc0eac66b2596ed5062fc12b53dbab0effcc704a",
+      "path": "prisma/migrations/20261104000000_init_migration_control/migration.sql"
+    },
+    {
+      "id": "20261104010000_create_global_system_enums",
+      "checksumSha256": "9c8e5fcf5e5f6ce395f39b02845ed191e16de7f286725c3d2a2c8ae36354729a",
+      "path": "prisma/migrations/20261104010000_create_global_system_enums/migration.sql"
+    },
+    {
+      "id": "20261105000000_create_users_table",
+      "checksumSha256": "282838e17b7ca4697942e6c87a5155f9ae787f7dd7340a15755468696bd2385b",
+      "path": "prisma/migrations/20261105000000_create_users_table/migration.sql"
+    },
+    {
+      "id": "20261105010000_create_user_profiles_table",
+      "checksumSha256": "6321f93575d4bbed9b29cc2f2836bbfeeb57fa40dcd1e01a21e3936344a05c2f",
+      "path": "prisma/migrations/20261105010000_create_user_profiles_table/migration.sql"
+    },
+    {
+      "id": "20261105020000_create_auth_sessions_table",
+      "checksumSha256": "a5da455a52744fd76e5b4639413bca5fa7841b49d89d9c9392b2cde806d705cc",
+      "path": "prisma/migrations/20261105020000_create_auth_sessions_table/migration.sql"
+    },
+    {
+      "id": "20261105030000_create_audit_logs_table",
+      "checksumSha256": "921bdff98be7028fb706ee5c31e20d81583a7e57048f86a248197082c3cd92a5",
+      "path": "prisma/migrations/20261105030000_create_audit_logs_table/migration.sql"
+    }
+  ]
+}

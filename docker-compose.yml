@@ -1,0 +1,50 @@
+# =============================================================================
+# PROJETO NEXA — SISTEMA INTELIGENTE DE MONITORAMENTO ACADÊMICO SENAI
+# CARD: [DB-003] Configurar Instância PostgreSQL 16 e Ambiente Docker Compose
+# =============================================================================
+# Como utilizar:
+# 1. Copie o arquivo .env.example para .env e defina suas credenciais locais.
+# 2. Execute: docker compose up -d
+# 3. Verifique o status: docker compose ps
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${POSTGRES_CONTAINER_NAME:-nexa-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER no arquivo .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB no arquivo .env}
+      TZ: ${POSTGRES_TZ:-America/Sao_Paulo}
+      PGTZ: ${POSTGRES_TZ:-America/Sao_Paulo}
+    command:
+      - "postgres"
+      - "-c"
+      - "timezone=America/Sao_Paulo"
+      - "-c"
+      - "log_timezone=America/Sao_Paulo"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - nexa_postgres_data:/var/lib/postgresql/data
+      - ./BancoNexa/docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -h localhost -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nexa_network
+
+volumes:
+  nexa_postgres_data:
+    name: nexa_postgres_data
+    driver: local
+
+networks:
+  nexa_network:
+    name: nexa_network
+    driver: bridge
