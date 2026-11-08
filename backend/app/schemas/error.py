@@ -2,10 +2,12 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.schemas.base import BaseResponseSchema
 
 
-class ErrorDetail(BaseModel):
+class ErrorDetail(BaseResponseSchema):
     """Detalhe individual de erro (ex: campo inválido na validação)."""
 
     field: str = Field(description="Nome ou caminho do campo com erro", examples=["email"])
@@ -20,7 +22,7 @@ class ErrorDetail(BaseModel):
     )
 
 
-class ErrorResponse(BaseModel):
+class ErrorResponse(BaseResponseSchema):
     """Contrato padronizado de resposta de erro da API NEXA."""
 
     success: bool = Field(default=False, description="Indica falha na requisição", examples=[False])

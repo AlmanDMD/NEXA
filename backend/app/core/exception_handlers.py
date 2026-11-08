@@ -149,13 +149,43 @@ def _translate_pydantic_error_message(err: dict[str, Any]) -> str:
         return "Campo adicional não permitido."
     if err_type == "json_invalid":
         return "Formato JSON inválido no corpo da requisição."
+    if err_type in ("uuid_parsing", "uuid_type"):
+        return "O valor deve ser um identificador UUID válido."
+    if err_type in ("datetime_parsing", "datetime_type", "datetime_from_date_parsing"):
+        return "O valor deve ser uma data e hora válida (ISO 8601)."
+    if err_type in (
+        "date_parsing",
+        "date_type",
+        "date_from_datetime_parsing",
+        "date_from_datetime_inexact",
+    ):
+        return "O valor deve ser uma data válida (AAAA-MM-DD)."
+    if err_type in ("time_parsing", "time_type"):
+        return "O valor deve ser um horário válido (HH:MM:SS)."
+    if err_type in ("url_parsing", "url_type", "url_scheme"):
+        return "O valor deve ser uma URL válida."
+    if err_type == "string_pattern_mismatch":
+        return "O valor informado não corresponde ao formato esperado."
+    if err_type == "too_short":
+        min_length = ctx.get("min_length")
+        if min_length is not None:
+            return f"O campo deve conter pelo menos {min_length} item(ns)."
+        return "A quantidade de itens informada é insuficiente."
+    if err_type == "too_long":
+        max_length = ctx.get("max_length")
+        if max_length is not None:
+            return f"O campo deve conter no máximo {max_length} item(ns)."
+        return "A quantidade de itens informada excede o limite permitido."
     if err_type.startswith("enum") or err_type == "literal_error":
         expected = ctx.get("expected")
         if expected:
             return f"Valor inválido. Opções permitidas: {expected}."
         return "Valor fora das opções permitidas."
-    if err_type == "value_error" and raw_msg.startswith("Value error, "):
-        return raw_msg.removeprefix("Value error, ")
+    if err_type == "value_error":
+        if "valid email address" in raw_msg.lower():
+            return "Endereço de e-mail inválido."
+        if raw_msg.startswith("Value error, "):
+            return raw_msg.removeprefix("Value error, ")
 
     return raw_msg
 
