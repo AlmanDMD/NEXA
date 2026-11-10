@@ -3,7 +3,7 @@ from typing import Annotated
 
 from dotenv import load_dotenv
 from fastapi import Depends
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     LOG_LEVEL: str = "INFO"
     LOG_JSON: bool = True
+
+    BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=31)
 
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     CORS_ALLOW_CREDENTIALS: bool = True
