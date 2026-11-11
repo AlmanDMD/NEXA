@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import logger, setup_logging
 from app.middlewares.cors import setup_cors_middleware
+from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
 
 
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(application)
     setup_cors_middleware(application, settings)
     application.include_router(health_router)
+    application.include_router(auth_router)
 
     return application
 

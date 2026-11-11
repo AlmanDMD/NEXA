@@ -1,5 +1,6 @@
 """Modelos ORM SQLAlchemy 2.0 para as tabelas users (DB-006) e user_profiles (DB-007)."""
 
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, Text, Uuid
@@ -7,6 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.schemas.enums import UserRole
+
+if TYPE_CHECKING:
+    from app.models.auth_session import AuthSession
 
 
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -41,6 +45,11 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         uselist=False,
         cascade="all, delete-orphan",
         lazy="selectin",
+    )
+    auth_sessions: Mapped[list["AuthSession"]] = relationship(
+        "AuthSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
 

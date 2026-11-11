@@ -1,20 +1,29 @@
-"""Serviço de hash de senhas e verificação criptográfica com Bcrypt (BE-004)."""
+"""Serviço de hash de senhas (Bcrypt - BE-004) e tokens JWT com PyJWT (BE-005)."""
 
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+import hashlib
 import hmac
 import re
-from functools import lru_cache
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
+from uuid import UUID, uuid4
 
 import bcrypt
 from fastapi import Depends
 from fastapi.security import HTTPBearer
+import jwt
 
 from app.core.config import get_settings
+from app.core.exceptions import UnauthorizedException
 
 DEFAULT_BCRYPT_ROUNDS: Final[int] = 12
 MIN_BCRYPT_ROUNDS: Final[int] = 4
 MAX_BCRYPT_ROUNDS: Final[int] = 31
 MAX_BCRYPT_PASSWORD_BYTES: Final[int] = 72
+
+ACCESS_TOKEN_EXPIRE_MINUTES: Final[int] = 15
+REFRESH_TOKEN_EXPIRE_DAYS: Final[int] = 7
+DEFAULT_JWT_ALGORITHM: Final[str] = "HS256"
 
 _BCRYPT_HASH_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\$2[aby]\$(\d{2})\$[./A-Za-z0-9]{53}$"
@@ -177,17 +186,146 @@ def needs_rehash(hashed_password: str) -> bool:
     return get_password_hasher().needs_rehash(hashed_password)
 
 
+def hash_refresh_token(refresh_token: str) -> str:
+    """Calcula o digest SHA-256 hexadecimal (64 chars minúsculos) de um Refresh Token."""
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        raise ValueError("O refresh token deve ser um texto não vazio.")
+    return hashlib.sha256(refresh_token.strip().encode("utf-8")).hexdigest()
+
+
+def create_access_token(
+    subject: str | UUID,
+    *,
+    email: str | None = None,
+    role: Any | None = None,
+    expires_delta: timedelta | None = None,
+    extra_claims: dict[str, Any] | None = None,
+) -> str:
+    """Gera um Access Token JWT assinado via PyJWT (vida útil padrão de 15 minutos)."""
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    delta = (
+        expires_delta
+        if expires_delta is not None
+        else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    expire = now + delta
+
+    payload: dict[str, Any] = {
+        "sub": str(subject),
+        "type": "access",
+        "iat": now,
+        "exp": expire,
+        "jti": str(uuid4()),
+    }
+    if email is not None:
+        payload["email"] = email
+    if role is not None:
+        payload["role"] = str(role.value if hasattr(role, "value") else role)
+    if extra_claims:
+        payload.update(extra_claims)
+
+    return jwt.encode(
+        payload,
+        settings.JWT_ACCESS_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def create_refresh_token(
+    subject: str | UUID,
+    *,
+    expires_delta: timedelta | None = None,
+    extra_claims: dict[str, Any] | None = None,
+) -> str:
+    """Gera um Refresh Token JWT assinado via PyJWT (vida útil padrão de 7 dias)."""
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    delta = (
+        expires_delta
+        if expires_delta is not None
+        else timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
+    expire = now + delta
+
+    payload: dict[str, Any] = {
+        "sub": str(subject),
+        "type": "refresh",
+        "iat": now,
+        "exp": expire,
+        "jti": str(uuid4()),
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+
+    return jwt.encode(
+        payload,
+        settings.JWT_REFRESH_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    """Decodifica e valida um Access Token JWT, lançando UnauthorizedException se inválido."""
+    settings = get_settings()
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            settings.JWT_ACCESS_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "type"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise UnauthorizedException(message="Token de acesso expirado.") from exc
+    except jwt.InvalidTokenError as exc:
+        raise UnauthorizedException(message="Token de acesso inválido.") from exc
+
+    if payload.get("type") != "access" or not payload.get("sub"):
+        raise UnauthorizedException(message="Token de acesso inválido.")
+
+    return payload
+
+
+def decode_refresh_token(token: str) -> dict[str, Any]:
+    """Decodifica e valida um Refresh Token JWT, lançando UnauthorizedException se inválido."""
+    settings = get_settings()
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            settings.JWT_REFRESH_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "type"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise UnauthorizedException(message="Refresh token expirado.") from exc
+    except jwt.InvalidTokenError as exc:
+        raise UnauthorizedException(message="Refresh token inválido.") from exc
+
+    if payload.get("type") != "refresh" or not payload.get("sub"):
+        raise UnauthorizedException(message="Refresh token inválido.")
+
+    return payload
+
+
 __all__ = [
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
     "DEFAULT_BCRYPT_ROUNDS",
+    "DEFAULT_JWT_ALGORITHM",
     "MAX_BCRYPT_PASSWORD_BYTES",
     "MAX_BCRYPT_ROUNDS",
     "MIN_BCRYPT_ROUNDS",
     "PasswordHasher",
     "PasswordHasherDep",
+    "REFRESH_TOKEN_EXPIRE_DAYS",
     "bearer_scheme",
+    "create_access_token",
+    "create_refresh_token",
+    "decode_access_token",
+    "decode_refresh_token",
     "get_password_hash",
     "get_password_hasher",
     "hash_password",
+    "hash_refresh_token",
     "needs_rehash",
     "password_hasher",
     "verify_password",
