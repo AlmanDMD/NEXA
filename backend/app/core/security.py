@@ -10,11 +10,13 @@ from uuid import UUID, uuid4
 
 import bcrypt
 from fastapi import Depends
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPBearer, OAuth2PasswordBearer
 import jwt
 
 from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedException
+from app.models.user import User
+from app.repositories.auth_repository import AuthRepositoryDep
 
 DEFAULT_BCRYPT_ROUNDS: Final[int] = 12
 MIN_BCRYPT_ROUNDS: Final[int] = 4
@@ -30,6 +32,12 @@ _BCRYPT_HASH_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+oauth2_scheme: Final[OAuth2PasswordBearer] = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/login",
+    description="Autenticação OAuth2 com Bearer Token JWT para rotas protegidas.",
+    auto_error=True,
+)
 
 
 class PasswordHasher:
@@ -276,12 +284,21 @@ def decode_access_token(token: str) -> dict[str, Any]:
             options={"require": ["sub", "exp", "iat", "type"]},
         )
     except jwt.ExpiredSignatureError as exc:
-        raise UnauthorizedException(message="Token de acesso expirado.") from exc
+        raise UnauthorizedException(
+            message="Token de acesso expirado.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
     except jwt.InvalidTokenError as exc:
-        raise UnauthorizedException(message="Token de acesso inválido.") from exc
+        raise UnauthorizedException(
+            message="Token de acesso inválido.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 
     if payload.get("type") != "access" or not payload.get("sub"):
-        raise UnauthorizedException(message="Token de acesso inválido.")
+        raise UnauthorizedException(
+            message="Token de acesso inválido.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     return payload
 
@@ -307,8 +324,55 @@ def decode_refresh_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    repository: AuthRepositoryDep,
+) -> User:
+    """Valida o Bearer Token JWT e injeta a entidade User autenticada no contexto da requisição.
+
+    - Bloqueia requisições sem Authorization Bearer retornando HTTP 401 Unauthorized.
+    - Bloqueia tokens com assinatura inválida, expirados ou de tipo incorreto com HTTP 401.
+    - Bloqueia usuários inexistentes ou inativos (is_active=False) com HTTP 401.
+    - Carrega e retorna a instância do modelo SQLAlchemy User com id, email e role tipados.
+    """
+    if not token or not token.strip():
+        raise UnauthorizedException(
+            message="Token de acesso ausente ou inválido.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = decode_access_token(token)
+    user_id_raw = payload.get("sub")
+    try:
+        user_id = UUID(str(user_id_raw))
+    except (ValueError, TypeError) as exc:
+        raise UnauthorizedException(
+            message="Token de acesso inválido.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    user = repository.get_user_by_id(user_id)
+    if user is None:
+        raise UnauthorizedException(
+            message="Usuário não encontrado ou inativo.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise UnauthorizedException(
+            message="Usuário inativo ou desativado.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user
+
+
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
 __all__ = [
     "ACCESS_TOKEN_EXPIRE_MINUTES",
+    "CurrentUserDep",
     "DEFAULT_BCRYPT_ROUNDS",
     "DEFAULT_JWT_ALGORITHM",
     "MAX_BCRYPT_PASSWORD_BYTES",
@@ -322,11 +386,13 @@ __all__ = [
     "create_refresh_token",
     "decode_access_token",
     "decode_refresh_token",
+    "get_current_user",
     "get_password_hash",
     "get_password_hasher",
     "hash_password",
     "hash_refresh_token",
     "needs_rehash",
+    "oauth2_scheme",
     "password_hasher",
     "verify_password",
 ]

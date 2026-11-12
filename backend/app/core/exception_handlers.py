@@ -55,6 +55,7 @@ HTTP_STATUS_ERROR_CODES: dict[int, tuple[str, str]] = {
 DEFAULT_ENGLISH_HTTP_DETAILS: set[str] = {
     "Bad Request",
     "Unauthorized",
+    "Not authenticated",
     "Forbidden",
     "Not Found",
     "Method Not Allowed",
