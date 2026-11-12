@@ -5,6 +5,7 @@ from app.schemas.auth import (
     LogoutResponseSchema,
     RefreshTokenResponseSchema,
     TokenResponseSchema,
+    UserMeResponse,
 )
 from app.schemas.base import (
     BaseRequestSchema,
@@ -89,6 +90,7 @@ __all__ = [
     "UUIDPathParam",
     "UUIDResponseMixin",
     "UserCreateSchema",
+    "UserMeResponse",
     "UserProfileCreateSchema",
     "UserProfileResponseSchema",
     "UserProfileUpdateSchema",

@@ -1,13 +1,15 @@
-"""Router de Autenticação, Registro, Renovação e Encerramento de Sessão (EPIC-01 / BE-005 / BE-006 / BE-007)."""
+"""Router de Autenticação, Registro, Renovação e Encerramento de Sessão (EPIC-01 / BE-005 / BE-006 / BE-007 / BE-010)."""
 
 from fastapi import APIRouter, Request, Response, status
 
 from app.core.config import SettingsDep
+from app.core.security import CurrentUserDep
 from app.schemas.auth import (
     LoginRequestSchema,
     LogoutResponseSchema,
     RefreshTokenResponseSchema,
     TokenResponseSchema,
+    UserMeResponse,
 )
 from app.schemas.user import UserCreateSchema, UserResponseSchema
 from app.services.auth_service import AuthServiceDep
@@ -152,6 +154,21 @@ async def logout(
     )
 
     return logout_response
+
+
+@router.get(
+    "/me",
+    response_model=UserMeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar dados do usuário autenticado atual",
+)
+async def get_me(
+    response: Response,
+    current_user: CurrentUserDep,
+) -> UserMeResponse:
+    """Retorna os dados cadastrais e perfil completo do usuário autenticado sem expor senha ou tokens."""
+    response.headers["Cache-Control"] = "no-store"
+    return UserMeResponse.model_validate(current_user)
 
 
 __all__ = ["router"]
