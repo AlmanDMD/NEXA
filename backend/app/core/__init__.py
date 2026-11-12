@@ -38,6 +38,7 @@ from app.core.security import (
     needs_rehash,
     oauth2_scheme,
     password_hasher,
+    require_role,
     verify_password,
 )
 
@@ -82,6 +83,7 @@ __all__ = [
     "oauth2_scheme",
     "password_hasher",
     "register_exception_handlers",
+    "require_role",
     "setup_logging",
     "verify_password",
 ]

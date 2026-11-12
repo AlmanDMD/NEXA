@@ -1,5 +1,6 @@
 """Serviço de hash de senhas (Bcrypt - BE-004) e tokens JWT com PyJWT (BE-005)."""
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import hashlib
@@ -9,7 +10,7 @@ from typing import Annotated, Any, Final
 from uuid import UUID, uuid4
 
 import bcrypt
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, OAuth2PasswordBearer
 import jwt
 
@@ -17,6 +18,7 @@ from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedException
 from app.models.user import User
 from app.repositories.auth_repository import AuthRepositoryDep
+from app.schemas.enums import UserRole
 
 DEFAULT_BCRYPT_ROUNDS: Final[int] = 12
 MIN_BCRYPT_ROUNDS: Final[int] = 4
@@ -370,6 +372,60 @@ def get_current_user(
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 
+def require_role(*allowed_roles: str | UserRole) -> Callable[[User], User]:
+    """Factory de dependência FastAPI para controle de acesso baseado em papéis (RBAC).
+
+    Valida se o usuário autenticado (injetado via get_current_user) possui pelo menos
+    um dos papéis permitidos para o endpoint.
+
+    Args:
+        *allowed_roles: Papéis institucionais autorizados (ex: 'ADMIN', 'COORDINATOR',
+            UserRole.TEACHER, UserRole.STUDENT). Suporta tanto instâncias de UserRole
+            quanto strings equivalentes.
+
+    Returns:
+        Callable de dependência FastAPI que recebe o usuário autenticado e o retorna
+        caso autorizado, permitindo uso tanto em `dependencies=[Depends(require_role(...))]`
+        quanto em injeção direta de parâmetro `current_user: User = Depends(require_role(...))`.
+
+    Raises:
+        ValueError: Caso nenhum papel seja especificado na chamada da factory.
+        HTTPException: HTTP 403 Forbidden com detail 'Acesso não autorizado para seu perfil'
+            caso o papel do usuário não esteja na lista permitida.
+    """
+    if not allowed_roles:
+        raise ValueError("Pelo menos um papel deve ser informado para require_role.")
+
+    normalized_roles: set[str] = set()
+    for role in allowed_roles:
+        if isinstance(role, UserRole):
+            normalized_roles.add(role.value.upper())
+        elif hasattr(role, "value"):
+            normalized_roles.add(str(role.value).upper())
+        elif isinstance(role, str):
+            normalized_roles.add(role.strip().upper())
+        else:
+            normalized_roles.add(str(role).upper())
+
+    def role_checker(
+        current_user: Annotated[User, Depends(get_current_user)],
+    ) -> User:
+        user_role_str = (
+            current_user.role.value
+            if hasattr(current_user.role, "value")
+            else str(current_user.role)
+        ).upper()
+
+        if user_role_str not in normalized_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso não autorizado para seu perfil",
+            )
+        return current_user
+
+    return role_checker
+
+
 __all__ = [
     "ACCESS_TOKEN_EXPIRE_MINUTES",
     "CurrentUserDep",
@@ -394,5 +450,6 @@ __all__ = [
     "needs_rehash",
     "oauth2_scheme",
     "password_hasher",
+    "require_role",
     "verify_password",
 ]
