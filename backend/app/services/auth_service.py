@@ -20,11 +20,13 @@ from app.core.security import (
 from app.repositories.auth_repository import AuthRepository, AuthRepositoryDep
 from app.schemas.auth import (
     LoginRequestSchema,
+    LogoutResponseSchema,
     RefreshTokenResponseSchema,
     TokenResponseSchema,
 )
 from app.schemas.user import UserCreateSchema, UserResponseSchema
 
+LOGOUT_SUCCESS_MESSAGE: Final[str] = "Sessão encerrada com sucesso"
 INVALID_CREDENTIALS_MESSAGE: Final[str] = "Credenciais inválidas"
 REFRESH_TOKEN_MISSING_MESSAGE: Final[str] = "Refresh token não informado."
 REFRESH_TOKEN_INVALID_MESSAGE: Final[str] = "Refresh token inválido."
@@ -262,6 +264,39 @@ class AuthService:
         )
         return refresh_response, new_refresh_token
 
+    def logout(
+        self,
+        refresh_token: str | None,
+        *,
+        ip_address: str | None = None,
+    ) -> LogoutResponseSchema:
+        """Encerra a sessão ativa no banco de dados e retorna mensagem de confirmação (BE-007)."""
+        if refresh_token and isinstance(refresh_token, str) and refresh_token.strip():
+            clean_token = refresh_token.strip()
+            try:
+                token_hash = hash_refresh_token(clean_token)
+                stored_session = self._repository.revoke_auth_session_by_token_hash(token_hash)
+                if stored_session is not None:
+                    logger.bind(
+                        session_id=str(stored_session.id),
+                        user_id=str(stored_session.user_id),
+                        ip_address=ip_address,
+                    ).info("Sessão revogada com sucesso no logout.")
+                else:
+                    logger.bind(ip_address=ip_address).warning(
+                        "Logout acionado com refresh token não localizado na base de sessões."
+                    )
+            except Exception as exc:
+                logger.bind(ip_address=ip_address).warning(
+                    f"Falha ao validar ou revogar sessão durante logout: {exc}"
+                )
+        else:
+            logger.bind(ip_address=ip_address).info(
+                "Logout acionado sem refresh token."
+            )
+
+        return LogoutResponseSchema(message=LOGOUT_SUCCESS_MESSAGE)
+
 
 def get_auth_service(
     repository: AuthRepositoryDep,
@@ -282,6 +317,7 @@ __all__ = [
     "AuthService",
     "AuthServiceDep",
     "INVALID_CREDENTIALS_MESSAGE",
+    "LOGOUT_SUCCESS_MESSAGE",
     "REFRESH_TOKEN_EXPIRED_MESSAGE",
     "REFRESH_TOKEN_INVALID_MESSAGE",
     "REFRESH_TOKEN_MISSING_MESSAGE",

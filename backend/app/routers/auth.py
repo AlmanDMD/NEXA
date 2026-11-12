@@ -1,10 +1,11 @@
-"""Router de Autenticação, Registro e Renovação de Sessão (EPIC-01 / BE-005 / BE-006)."""
+"""Router de Autenticação, Registro, Renovação e Encerramento de Sessão (EPIC-01 / BE-005 / BE-006 / BE-007)."""
 
 from fastapi import APIRouter, Request, Response, status
 
 from app.core.config import SettingsDep
 from app.schemas.auth import (
     LoginRequestSchema,
+    LogoutResponseSchema,
     RefreshTokenResponseSchema,
     TokenResponseSchema,
 )
@@ -110,6 +111,47 @@ async def refresh(
     )
 
     return refresh_response
+
+
+@router.post(
+    "/logout",
+    response_model=LogoutResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Encerrar sessão do usuário e invalidar refresh token",
+)
+async def logout(
+    request: Request,
+    response: Response,
+    auth_service: AuthServiceDep,
+    settings: SettingsDep,
+) -> LogoutResponseSchema:
+    """Invalida a sessão no banco de dados (is_revoked=True) e limpa o cookie HttpOnly refresh_token."""
+    raw_refresh_token = request.cookies.get(settings.REFRESH_COOKIE_NAME)
+    if not raw_refresh_token:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    raw_refresh_token = body.get("refresh_token")
+            except Exception:
+                pass
+
+    ip_address = _extract_client_ip(request)
+    logout_response = auth_service.logout(
+        raw_refresh_token,
+        ip_address=ip_address,
+    )
+
+    response.delete_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        path=settings.REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+
+    return logout_response
 
 
 __all__ = ["router"]

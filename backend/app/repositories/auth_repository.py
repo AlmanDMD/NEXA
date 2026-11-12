@@ -146,6 +146,16 @@ class AuthRepository:
         self._session.refresh(auth_session)
         return auth_session
 
+    def revoke_auth_session_by_token_hash(
+        self,
+        refresh_token_hash: str,
+    ) -> AuthSession | None:
+        """Busca e invalida uma sessão pelo hash SHA-256 do Refresh Token (BE-007)."""
+        session = self.get_auth_session_by_token_hash(refresh_token_hash)
+        if session is not None and not session.is_revoked:
+            return self.revoke_auth_session(session)
+        return session
+
     def revoke_all_user_sessions(self, user_id: UUID) -> int:
         """Revoga em cadeia todas as sessões ativas de um usuário (mitigação de reúso de token)."""
         stmt = (
