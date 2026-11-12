@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends
@@ -30,7 +30,27 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_JSON: bool = True
 
+    DATABASE_URL: str = "sqlite:///./nexa.db"
+
     BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=31)
+
+    JWT_ACCESS_SECRET: str = Field(
+        default="nexa-dev-jwt-access-secret-key-min-32-bytes-2026",
+        min_length=16,
+    )
+    JWT_REFRESH_SECRET: str = Field(
+        default="nexa-dev-jwt-refresh-secret-key-min-32-bytes-2026",
+        min_length=16,
+    )
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, ge=1)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1)
+
+    REFRESH_COOKIE_NAME: str = "refresh_token"
+    REFRESH_COOKIE_HTTPONLY: bool = True
+    REFRESH_COOKIE_SECURE: bool = True
+    REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
+    REFRESH_COOKIE_PATH: str = "/"
 
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     CORS_ALLOW_CREDENTIALS: bool = True
