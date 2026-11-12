@@ -1,9 +1,13 @@
-"""Router de Autenticação e Registro de Usuários (EPIC-01 / BE-005)."""
+"""Router de Autenticação, Registro e Renovação de Sessão (EPIC-01 / BE-005 / BE-006)."""
 
 from fastapi import APIRouter, Request, Response, status
 
 from app.core.config import SettingsDep
-from app.schemas.auth import LoginRequestSchema, TokenResponseSchema
+from app.schemas.auth import (
+    LoginRequestSchema,
+    RefreshTokenResponseSchema,
+    TokenResponseSchema,
+)
 from app.schemas.user import UserCreateSchema, UserResponseSchema
 from app.services.auth_service import AuthServiceDep
 
@@ -70,6 +74,42 @@ async def login(
     )
 
     return token_response
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshTokenResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Renovar sessão e rotacionar Refresh Token",
+)
+async def refresh(
+    request: Request,
+    response: Response,
+    auth_service: AuthServiceDep,
+    settings: SettingsDep,
+) -> RefreshTokenResponseSchema:
+    """Lê o cookie HttpOnly refresh_token, valida a sessão no banco, realiza Token Rotation e emite novo Access Token."""
+    raw_refresh_token = request.cookies.get(settings.REFRESH_COOKIE_NAME)
+    user_agent = request.headers.get("user-agent")
+    ip_address = _extract_client_ip(request)
+
+    refresh_response, new_refresh_token = auth_service.refresh_session(
+        raw_refresh_token,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+
+    response.set_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        value=new_refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path=settings.REFRESH_COOKIE_PATH,
+    )
+
+    return refresh_response
 
 
 __all__ = ["router"]

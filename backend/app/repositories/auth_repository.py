@@ -1,11 +1,11 @@
-"""Repositório de persistência para Usuários, Perfis e Sessões de Autenticação (BE-005)."""
+"""Repositório de persistência para Usuários, Perfis e Sessões de Autenticação (BE-005 / BE-006)."""
 
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import DbSessionDep
@@ -137,6 +137,71 @@ class AuthRepository:
             AuthSession.refresh_token_hash == normalized_hash
         )
         return self._session.scalar(stmt)
+
+    def revoke_auth_session(self, auth_session: AuthSession) -> AuthSession:
+        """Marca uma sessão específica como revogada (is_revoked=True)."""
+        auth_session.is_revoked = True
+        self._session.add(auth_session)
+        self._session.commit()
+        self._session.refresh(auth_session)
+        return auth_session
+
+    def revoke_all_user_sessions(self, user_id: UUID) -> int:
+        """Revoga em cadeia todas as sessões ativas de um usuário (mitigação de reúso de token)."""
+        stmt = (
+            update(AuthSession)
+            .where(
+                AuthSession.user_id == user_id,
+                AuthSession.is_revoked.is_(False),
+            )
+            .values(is_revoked=True)
+        )
+        result = self._session.execute(stmt)
+        self._session.commit()
+        return int(result.rowcount or 0)
+
+    def rotate_auth_session(
+        self,
+        *,
+        previous_session: AuthSession,
+        new_refresh_token_hash: str,
+        expires_at: datetime,
+        user_agent: str | None = None,
+        ip_address: str | None = None,
+    ) -> AuthSession:
+        """Invalida a sessão anterior e registra uma nova sessão de forma transacional (token rotation)."""
+        now = datetime.now(timezone.utc)
+        effective_expires_at = (
+            expires_at
+            if expires_at > now
+            else datetime.fromtimestamp(now.timestamp() + 1, tz=timezone.utc)
+        )
+
+        previous_session.is_revoked = True
+        self._session.add(previous_session)
+
+        new_session = AuthSession(
+            id=uuid4(),
+            user_id=previous_session.user_id,
+            refresh_token_hash=new_refresh_token_hash,
+            user_agent=(
+                user_agent[:500]
+                if user_agent
+                else previous_session.user_agent
+            ),
+            ip_address=(
+                ip_address[:45]
+                if ip_address
+                else previous_session.ip_address
+            ),
+            expires_at=effective_expires_at,
+            is_revoked=False,
+            created_at=now,
+        )
+        self._session.add(new_session)
+        self._session.commit()
+        self._session.refresh(new_session)
+        return new_session
 
 
 def get_auth_repository(session: DbSessionDep) -> AuthRepository:
