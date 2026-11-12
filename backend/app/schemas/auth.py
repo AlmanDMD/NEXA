@@ -75,9 +75,14 @@ class LogoutResponseSchema(BaseResponseSchema):
     )
 
 
+class UserMeResponse(UserResponseSchema):
+    """Schema de resposta para consulta do usuário autenticado atual (GET /api/v1/auth/me)."""
+
+
 __all__ = [
     "LoginRequestSchema",
     "LogoutResponseSchema",
     "RefreshTokenResponseSchema",
     "TokenResponseSchema",
+    "UserMeResponse",
 ]
