@@ -33,6 +33,8 @@ import {
 } from '../lib/icons';
 import { Link, useLocation, useParams } from '../lib/router';
 import { useAcademicQueries } from '../context/AcademicContext';
+import { INITIAL_PLATFORM_USERS, UsersManagementPanel } from '../components/domain/UsersManagementPanel';
+import { UserFormModal } from '../components/domain/UserFormModal';
 import {
   cx,
   EmptyState,
@@ -1628,6 +1630,22 @@ export function ReportsPage() {
 export function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+  const [platformUsers, setPlatformUsers] = useState(INITIAL_PLATFORM_USERS);
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  const handleToggleUserStatus = (userId) => {
+    setPlatformUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, status: u.status === 'Ativo' ? 'Inativo' : 'Ativo' } : u)),
+    );
+  };
+
+  const handleSaveUser = (savedUser) => {
+    setPlatformUsers((prev) => {
+      const exists = prev.some((u) => u.id === savedUser.id);
+      return exists ? prev.map((u) => (u.id === savedUser.id ? savedUser : u)) : [savedUser, ...prev];
+    });
+  };
 
   return (
     <main className="animate-rise">
@@ -1670,6 +1688,7 @@ export function SettingsPage() {
           </div>
           {[
             ['Perfil e instituição', UserRound],
+            ['Usuários e permissões', Users],
             ['Parâmetros acadêmicos', SlidersHorizontal],
             ['Preferências de notificação', Settings],
             ['Privacidade e segurança (LGPD)', ShieldCheck],
@@ -1762,6 +1781,25 @@ export function SettingsPage() {
               </label>
             </div>
           </section>
+          <UsersManagementPanel
+            users={platformUsers}
+            onToggleStatus={handleToggleUserStatus}
+            onOpenCreate={() => {
+              setEditingUser(null);
+              setUserModalOpen(true);
+            }}
+            onOpenEdit={(user) => {
+              setEditingUser(user);
+              setUserModalOpen(true);
+            }}
+          />
+          <UserFormModal
+            open={userModalOpen}
+            onClose={() => setUserModalOpen(false)}
+            onSave={handleSaveUser}
+            editingUser={editingUser}
+            existingEmails={platformUsers.map((u) => u.email)}
+          />
           <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_2px_8px_rgba(34,64,99,.035)]">
             <h2 className="font-[var(--app-font-serif)] text-lg font-bold text-slate-800">Privacidade e segurança (LGPD)</h2>
             <div className="mt-4 flex items-start gap-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600">
