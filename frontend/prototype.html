@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEXA — Protótipo Frontend (Design System Limpo)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .pill-btn {
+      transition: all 0.15s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col font-sans">
+
+  <!-- TOPBAR INSTITUCIONAL SENAI / NEXA -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-6 py-3 flex items-center justify-between shadow-xs">
+    <div class="flex items-center gap-6">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-red-600 rounded-lg flex items-center justify-center text-white font-bold tracking-wider text-sm shadow-xs">
+          N
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-slate-900 tracking-tight text-base">NEXA</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 font-semibold border border-red-200">SENAI</span>
+          </div>
+          <p class="text-xs text-slate-500">Monitoramento Acadêmico Inteligente</p>
+        </div>
+      </div>
+
+      <!-- Seletor de Contexto de Aula -->
+      <div class="hidden md:flex items-center gap-3 pl-6 border-l border-slate-200 text-sm">
+        <div class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg cursor-pointer transition">
+          <span class="text-xs font-semibold text-slate-500 uppercase">Turma</span>
+          <span class="font-medium text-slate-800">402 — Automação Industrial</span>
+          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        </div>
+
+        <div class="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg text-slate-700">
+          <span class="text-xs font-semibold text-slate-500 uppercase">Oficina</span>
+          <span class="font-medium">Lab 4B • Bancadas CLP</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Usuário / Perfil e Ações Rápidas -->
+    <div class="flex items-center gap-4">
+      <div class="text-right hidden sm:block">
+        <p class="text-sm font-semibold text-slate-900">Prof. Matheus Boff</p>
+        <p class="text-xs text-slate-500">Docente • Automação e Mecatrônica</p>
+      </div>
+      <div class="w-10 h-10 rounded-full bg-slate-800 text-white font-medium flex items-center justify-center text-sm shadow-xs border-2 border-white">
+        MB
+      </div>
+    </div>
+  </header>
+
+  <!-- NAVEGAÇÃO DE ABAS PRINCIPAIS (Clean & Flat) -->
+  <nav class="bg-white border-b border-slate-200 px-6 flex items-center gap-8 text-sm font-medium">
+    <button onclick="switchTab('chamada')" id="tab-chamada" class="py-3.5 border-b-2 border-red-600 text-red-600 flex items-center gap-2 cursor-pointer font-semibold transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+      Chamada Rápida em 1 Clique
+    </button>
+    <button onclick="switchTab('oficinas')" id="tab-oficinas" class="py-3.5 border-b-2 border-transparent text-slate-600 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+      Tarefas Práticas & Rubricas
+    </button>
+    <button onclick="switchTab('dashboard')" id="tab-dashboard" class="py-3.5 border-b-2 border-transparent text-slate-600 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+      Dashboard Híbrido da Turma
+    </button>
+    <button onclick="switchTab('avisos')" id="tab-avisos" class="py-3.5 border-b-2 border-transparent text-slate-600 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+      Mural de Avisos
+    </button>
+  </nav>
+
+  <!-- CONTEÚDO PRINCIPAL: ABA CHAMADA RÁPIDA -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
+
+    <!-- BARRA SUPERIOR DE COMANDOS: OBJETIVA E DESPOLUÍDA -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3">
+          <h1 class="text-xl font-bold text-slate-900">Diário de Chamada da Oficina</h1>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Aula 14 de 30 • 26/03/2026
+          </span>
+        </div>
+        <p class="text-sm text-slate-500 mt-0.5">Prática em Bancada: Parametrização e Lógica Ladder no CLP Siemens S7-1200</p>
+      </div>
+
+      <!-- Resumo Numérico Limpo (sem 4 cards gigantes poluindo a tela) -->
+      <div class="flex items-center gap-3 self-start lg:self-auto">
+        <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-medium">
+          <span class="text-slate-500">Matriculados:</span>
+          <span class="font-bold text-slate-800 text-sm" id="count-total">38</span>
+        </div>
+        <div class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-xl text-xs font-medium text-emerald-800">
+          <span>Presentes:</span>
+          <span class="font-bold text-sm" id="count-presentes">35</span>
+        </div>
+        <div class="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3.5 py-2 rounded-xl text-xs font-medium text-rose-800">
+          <span>Ausentes:</span>
+          <span class="font-bold text-sm" id="count-ausentes">3</span>
+        </div>
+
+        <!-- Botão Primário: Salvar -->
+        <button onclick="saveAttendance()" class="bg-red-600 hover:bg-red-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition shadow-xs flex items-center gap-2 cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          Salvar Frequência
+        </button>
+      </div>
+    </div>
+
+    <!-- ALERTA DISCRETO (ao invés de um banner gigante que rouba 30% da tela) -->
+    <div class="bg-amber-50/70 border border-amber-200/80 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-amber-900">
+      <div class="flex items-center gap-2.5">
+        <svg class="w-4 h-4 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+        <span><strong>Atenção de Limite Regimental (75%):</strong> 3 estudantes da turma estão na margem crítica de faltas. Identificados com o selo âmbar.</span>
+      </div>
+      <button onclick="filterCritical()" class="text-xs font-semibold text-amber-900 underline hover:text-amber-700 cursor-pointer">Filtrar alunos em risco</button>
+    </div>
+
+    <!-- BARRA DE CONTROLE DA CHAMADA (1 Clique + Filtros) -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <button onclick="markAllPresent()" class="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-medium text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs">
+          <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          Marcar Todos Presentes
+        </button>
+        <button onclick="resetFilters()" class="bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 font-medium text-xs px-3 py-2 rounded-xl transition cursor-pointer shadow-2xs">
+          Ver Todos
+        </button>
+      </div>
+
+      <!-- Campo de Busca -->
+      <div class="relative w-full sm:w-72">
+        <input type="text" id="search-input" oninput="searchStudents(this.value)" placeholder="Buscar aluno por nome, RA ou bancada..." class="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition shadow-2xs">
+        <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+      </div>
+    </div>
+
+    <!-- GRADE DE ALUNOS / BANCADAS (Layout Limpo, 2 colunas no desktop, legível e ágil) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="students-grid">
+      <!-- Cards renderizados dinamicamente via JavaScript -->
+    </div>
+
+  </main>
+
+  <script>
+    const studentsData = [
+      {
+        id: "ALU-001",
+        name: "Lucas Fernandes de Oliveira",
+        ra: "2024.01.40201",
+        bancada: "Bancada 01 — CLP Siemens S7-1200",
+        freq: 94,
+        status: "PRESENT",
+        isRisk: false
+      },
+      {
+        id: "ALU-002",
+        name: "Beatriz Santos Guimarães",
+        ra: "2024.01.40209",
+        bancada: "Bancada 02 — Servomotores & Inversores",
+        freq: 71,
+        status: "ABSENT",
+        isRisk: true,
+        riskNote: "71% (< 75% regimento SENAI)"
+      },
+      {
+        id: "ALU-003",
+        name: "Carlos Eduardo Mendes",
+        ra: "2024.01.40214",
+        bancada: "Bancada 03 — Festo Didactic Pneumática",
+        freq: 88,
+        status: "PRESENT",
+        isRisk: false
+      },
+      {
+        id: "ALU-004",
+        name: "Rafael Albuquerque Castro",
+        ra: "2024.01.40222",
+        bancada: "Bancada 04 — Eletropneumática Industrial",
+        freq: 74,
+        status: "PRESENT",
+        isRisk: true,
+        riskNote: "74% (Margem de 1 falta para corte)"
+      },
+      {
+        id: "ALU-005",
+        name: "Mariana Souza Ribeiro",
+        ra: "2024.01.40229",
+        bancada: "Bancada 05 — IHM & Redes Industriais",
+        freq: 98,
+        status: "PRESENT",
+        isRisk: false
+      },
+      {
+        id: "ALU-006",
+        name: "Gabriel Silveira Santos",
+        ra: "2024.01.40235",
+        bancada: "Bancada 06 — Robótica Articulada",
+        freq: 69,
+        status: "ABSENT",
+        isRisk: true,
+        riskNote: "69% (Crítico - 3 faltas consecutivas)"
+      }
+    ];
+
+    let currentList = [...studentsData];
+
+    function renderGrid() {
+      const container = document.getElementById('students-grid');
+      container.innerHTML = '';
+
+      currentList.forEach(student => {
+        const card = document.createElement('div');
+        const isAbsent = student.status === 'ABSENT';
+        const isJustified = student.status === 'JUSTIFIED';
+        const isPresent = student.status === 'PRESENT';
+
+        card.className = `bg-white rounded-2xl border p-4.5 flex flex-col justify-between transition-all duration-200 shadow-2xs hover:shadow-sm ${
+          isAbsent ? 'border-rose-300 bg-rose-50/20' : isJustified ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'
+        }`;
+
+        const initials = student.name.split(' ').slice(0, 2).map(n => n[0]).join('');
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between text-xs text-slate-500 pb-2.5 mb-2.5 border-b border-slate-100">
+              <span class="font-medium text-slate-700 truncate max-w-[200px]" title="${student.bancada}">${student.bancada}</span>
+              ${student.isRisk ? `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800" title="${student.riskNote}">
+                  ⚠️ ${student.freq}%
+                </span>
+              ` : `
+                <span class="text-slate-400 font-medium">${student.freq}% assiduidade</span>
+              `}
+            </div>
+
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0 border border-slate-200">
+                ${initials}
+              </div>
+              <div class="overflow-hidden">
+                <h3 class="font-bold text-slate-900 text-sm truncate" title="${student.name}">${student.name}</h3>
+                <p class="text-xs text-slate-400">RA: ${student.ra}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl">
+            <button onclick="setStatus('${student.id}', 'PRESENT')" class="pill-btn flex-1 py-1.5 rounded-lg text-xs font-semibold cursor-pointer text-center ${
+              isPresent ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }">
+              Presente
+            </button>
+            <button onclick="setStatus('${student.id}', 'ABSENT')" class="pill-btn flex-1 py-1.5 rounded-lg text-xs font-semibold cursor-pointer text-center ${
+              isAbsent ? 'bg-rose-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }">
+              Falta
+            </button>
+            <button onclick="setStatus('${student.id}', 'JUSTIFIED')" class="pill-btn flex-1 py-1.5 rounded-lg text-xs font-semibold cursor-pointer text-center ${
+              isJustified ? 'bg-amber-500 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }">
+              Justif.
+            </button>
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+
+      updateCounters();
+    }
+
+    function setStatus(id, newStatus) {
+      const student = studentsData.find(s => s.id === id);
+      if (student) {
+        student.status = newStatus;
+        renderGrid();
+      }
+    }
+
+    function markAllPresent() {
+      studentsData.forEach(s => s.status = 'PRESENT');
+      renderGrid();
+    }
+
+    function updateCounters() {
+      const total = studentsData.length;
+      const presentes = studentsData.filter(s => s.status === 'PRESENT').length;
+      const ausentes = studentsData.filter(s => s.status === 'ABSENT').length;
+
+      document.getElementById('count-total').textContent = total;
+      document.getElementById('count-presentes').textContent = presentes;
+      document.getElementById('count-ausentes').textContent = ausentes;
+    }
+
+    function searchStudents(query) {
+      const q = query.toLowerCase();
+      currentList = studentsData.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        s.ra.toLowerCase().includes(q) ||
+        s.bancada.toLowerCase().includes(q)
+      );
+      renderGrid();
+    }
+
+    function filterCritical() {
+      currentList = studentsData.filter(s => s.isRisk);
+      renderGrid();
+    }
+
+    function resetFilters() {
+      document.getElementById('search-input').value = '';
+      currentList = [...studentsData];
+      renderGrid();
+    }
+
+    function switchTab(tabKey) {
+      const tabs = ['chamada', 'oficinas', 'dashboard', 'avisos'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`tab-${t}`);
+        if (t === tabKey) {
+          btn.className = "py-3.5 border-b-2 border-red-600 text-red-600 flex items-center gap-2 cursor-pointer font-semibold transition";
+        } else {
+          btn.className = "py-3.5 border-b-2 border-transparent text-slate-600 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition";
+        }
+      });
+      alert(`Alternando para a aba "${tabKey.toUpperCase()}" (Simulação do Protótipo).`);
+    }
+
+    function saveAttendance() {
+      const presentes = studentsData.filter(s => s.status === 'PRESENT').length;
+      const ausentes = studentsData.filter(s => s.status === 'ABSENT').length;
+      alert(`✅ Frequência salva com sucesso!\n\n• Presentes: ${presentes}\n• Ausentes: ${ausentes}\n• Sincronizado com o diário oficial da turma 402.`);
+    }
+
+    renderGrid();
+  </script>
+</body>
+</html>
