@@ -320,3 +320,9 @@
   border-radius: 99px;
 }
 
+
+/* WCAG 2.1 AA Focus Visibility (FE-049) */
+:focus-visible {
+  outline: 2px solid hsl(198 86% 44%);
+  outline-offset: 2px;
+}

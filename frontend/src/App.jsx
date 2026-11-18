@@ -26,6 +26,7 @@ import {
 import { Link, Route, Router as WouterRouter, Switch, useLocation } from './lib/router';
 import { AcademicDataProvider, useAcademicQueries } from './context/AcademicContext';
 import { cx, NotFound } from './components/ui-primitives';
+import { AccessibilityController } from './components/layout/AccessibilitySkipLink';
 import {
   AlertsPage,
   AnalysisPage,
@@ -298,6 +299,7 @@ function AppShell() {
 
   return (
     <div className="min-h-[100dvh] bg-[#f4f7fa]">
+      <AccessibilityController role={role} />
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -397,7 +399,7 @@ function AppShell() {
           </div>
         </header>
 
-        <div className="mx-auto max-w-[1500px] px-4 py-7 md:px-8 md:py-9">
+        <div id="conteudo-principal" tabIndex={-1} className="mx-auto max-w-[1500px] px-4 py-7 md:px-8 md:py-9 outline-none">
           <Switch>
             {/* Visão do Professor (8 páginas originais do Replit + 2 páginas complementares) */}
             <Route path="/dashboard" component={Dashboard} />
