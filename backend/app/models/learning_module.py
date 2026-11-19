@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from app.models.module_competency import ModuleCompetency
     from app.models.subject import Subject
 
 _DECIMAL_QUANTIZER = Decimal("0.01")
@@ -114,6 +115,12 @@ class LearningModule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="learning_modules",
         lazy="joined",
         innerjoin=True,
+    )
+    module_competencies: Mapped[list["ModuleCompetency"]] = relationship(
+        "ModuleCompetency",
+        back_populates="module",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     @validates("title")

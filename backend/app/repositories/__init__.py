@@ -10,6 +10,11 @@ from app.repositories.auth_repository import (
     AuthRepositoryDep,
     get_auth_repository,
 )
+from app.repositories.competency_repository import (
+    CompetencyRepository,
+    CompetencyRepositoryDep,
+    get_competency_repository,
+)
 from app.repositories.course_repository import (
     CourseRepository,
     CourseRepositoryDep,
@@ -31,6 +36,8 @@ __all__ = [
     "AcademicClassRepositoryDep",
     "AuthRepository",
     "AuthRepositoryDep",
+    "CompetencyRepository",
+    "CompetencyRepositoryDep",
     "CourseRepository",
     "CourseRepositoryDep",
     "LearningModuleRepository",
@@ -39,6 +46,7 @@ __all__ = [
     "SubjectRepositoryDep",
     "get_academic_class_repository",
     "get_auth_repository",
+    "get_competency_repository",
     "get_course_repository",
     "get_learning_module_repository",
     "get_subject_repository",

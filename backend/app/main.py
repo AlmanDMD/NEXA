@@ -11,6 +11,7 @@ from app.core.logging import logger, setup_logging
 from app.middlewares.cors import setup_cors_middleware
 from app.routers.auth import router as auth_router
 from app.routers.classes import router as classes_router
+from app.routers.competencies import router as competencies_router
 from app.routers.courses import router as courses_router
 from app.routers.health import router as health_router
 from app.routers.learning_modules import router as learning_modules_router
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     application.include_router(classes_router)
     application.include_router(subjects_router)
     application.include_router(learning_modules_router)
+    application.include_router(competencies_router)
 
     return application
 
