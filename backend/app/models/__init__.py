@@ -2,11 +2,13 @@
 
 from app.models.auth_session import AuthSession
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.course import Course
 from app.models.user import User, UserProfile
 
 __all__ = [
     "AuthSession",
     "Base",
+    "Course",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
     "User",
