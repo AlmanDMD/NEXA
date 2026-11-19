@@ -112,6 +112,144 @@ function generatePythonEnums(enums) {
   return lines.join('\n');
 }
 
+function parsePrismaModels(schemaContent, enumNames) {
+  const SCALAR_TYPES = new Set(['String', 'Int', 'Float', 'Decimal', 'Boolean', 'DateTime', 'Json', 'Bytes', 'BigInt']);
+  const modelRegex = /model\s+([A-Za-z0-9_]+)\s*\{([\s\S]*?)\}/g;
+  const parsedModels = [];
+  let match;
+
+  while ((match = modelRegex.exec(schemaContent)) !== null) {
+    const name = match[1];
+    const body = match[2];
+    let tableName = name.toLowerCase();
+    const fields = [];
+
+    for (const rawLine of body.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('//')) continue;
+
+      const tableMapMatch = line.match(/^@@map\("([^"]+)"\)/);
+      if (tableMapMatch) {
+        tableName = tableMapMatch[1];
+        continue;
+      }
+      if (line.startsWith('@@')) continue;
+
+      const fieldMatch = line.match(/^([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+)(\[\])?(\?)?(.*)$/);
+      if (!fieldMatch) continue;
+
+      const fieldName = fieldMatch[1];
+      const baseType = fieldMatch[2];
+      const isList = Boolean(fieldMatch[3]);
+      const isOptional = Boolean(fieldMatch[4]);
+      const attrs = fieldMatch[5] || '';
+
+      // Ignora campos de relacionamento Prisma (não são colunas físicas)
+      if (!SCALAR_TYPES.has(baseType) && !enumNames.has(baseType)) continue;
+      if (attrs.includes('@relation(')) continue;
+
+      const colMapMatch = attrs.match(/@map\("([^"]+)"\)/);
+      const columnName = colMapMatch ? colMapMatch[1] : fieldName;
+      const isId = attrs.includes('@id');
+      const hasDefault = attrs.includes('@default(') || attrs.includes('@updatedAt');
+      const isUnique = attrs.includes('@unique');
+
+      fields.push({
+        name: fieldName,
+        columnName,
+        prismaType: baseType,
+        isList,
+        isOptional,
+        isEnum: enumNames.has(baseType),
+        isId,
+        hasDefault,
+        isUnique,
+      });
+    }
+
+    parsedModels.push({
+      name,
+      tableName,
+      fields,
+    });
+  }
+
+  return parsedModels;
+}
+
+function prismaTypeToTs(field) {
+  const map = {
+    String: 'string',
+    Int: 'number',
+    Float: 'number',
+    Decimal: 'number | string',
+    Boolean: 'boolean',
+    DateTime: 'Date',
+    Json: 'Record<string, unknown>',
+    Bytes: 'Uint8Array',
+    BigInt: 'bigint',
+  };
+  const base = field.isEnum ? field.prismaType : map[field.prismaType] || 'unknown';
+  const withList = field.isList ? `${base}[]` : base;
+  return field.isOptional ? `${withList} | null` : withList;
+}
+
+function generateTypeScriptModels(models) {
+  const usedEnums = new Set();
+  for (const m of models) {
+    for (const f of m.fields) {
+      if (f.isEnum) usedEnums.add(f.prismaType);
+    }
+  }
+
+  const lines = [
+    '/**',
+    ' * ARQUIVO GERADO AUTOMATICAMENTE POR `npm run db:generate`',
+    ' * Tipos TypeScript dos Modelos Prisma / Tabelas PostgreSQL 16 (Projeto NEXA)',
+    ' * Sincronizado com `prisma/schema.prisma` (camelCase na aplicação e snake_case no SQL).',
+    ' */',
+    '',
+  ];
+
+  if (usedEnums.size > 0) {
+    lines.push(`import type { ${[...usedEnums].sort().join(', ')} } from './system-enums';`);
+    lines.push('');
+  }
+
+  for (const m of models) {
+    lines.push(`/** Modelo Prisma \`${m.name}\` mapeado para a tabela PostgreSQL \`${m.tableName}\` */`);
+    lines.push(`export interface ${m.name} {`);
+    for (const f of m.fields) {
+      lines.push(`  ${f.name}: ${prismaTypeToTs(f)};`);
+    }
+    lines.push(`}`);
+    lines.push('');
+
+    lines.push(`/** Registro SQL snake_case da tabela \`${m.tableName}\` */`);
+    lines.push(`export interface ${m.name}Row {`);
+    for (const f of m.fields) {
+      lines.push(`  ${f.columnName}: ${prismaTypeToTs(f)};`);
+    }
+    lines.push(`}`);
+    lines.push('');
+
+    lines.push(`/** Payload de criação para \`${m.name}\` */`);
+    lines.push(`export interface ${m.name}CreateInput {`);
+    for (const f of m.fields) {
+      const optMark = f.hasDefault || f.isOptional ? '?' : '';
+      lines.push(`  ${f.name}${optMark}: ${prismaTypeToTs(f)};`);
+    }
+    lines.push(`}`);
+    lines.push('');
+
+    lines.push(`/** Payload de atualização parcial para \`${m.name}\` */`);
+    lines.push(`export type ${m.name}UpdateInput = Partial<Omit<${m.name}CreateInput, 'id'>>;`);
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 function main() {
   console.log('======================================================================');
   console.log('⚙️  NEXA DB GENERATE — VALIDAÇÃO DE SCHEMA & GERAÇÃO DE TIPOS ENUM');
@@ -134,6 +272,8 @@ function main() {
   }
 
   const parsedEnums = parsePrismaEnums(schemaContent);
+  const enumNames = new Set(parsedEnums.map((e) => e.name));
+  const parsedModels = parsePrismaModels(schemaContent, enumNames);
   const sql3fnContent = fs.existsSync(SQL_3FN_PATH) ? fs.readFileSync(SQL_3FN_PATH, 'utf8') : '';
   const tableMatches = [...sql3fnContent.matchAll(/CREATE\s+TABLE\s+([a-z0-9_]+)\s*\(/gi)].map((m) => m[1]);
   const enumMatches = [...sql3fnContent.matchAll(/CREATE\s+TYPE\s+([a-z0-9_]+)\s+AS\s+ENUM/gi)].map((m) => m[1]);
@@ -146,6 +286,7 @@ function main() {
     JSON.stringify({ generatedAt: 'DB-005', enums: parsedEnums }, null, 2) + '\n',
     'utf8'
   );
+  fs.writeFileSync(path.join(TYPES_DIR, 'schema-models.ts'), generateTypeScriptModels(parsedModels), 'utf8');
 
   const migrations = [];
   if (fs.existsSync(PRISMA_MIGRATIONS_DIR)) {
@@ -174,6 +315,8 @@ function main() {
     logicalModel3fnSha256: sha256(sql3fnContent),
     totalTables3fn: tableMatches.length,
     totalEnums: parsedEnums.length,
+    totalPrismaModels: parsedModels.length,
+    prismaModels: parsedModels.map((m) => ({ name: m.name, tableName: m.tableName, fieldCount: m.fields.length })),
     tables: tableMatches,
     enums: parsedEnums,
     sqlEnumTypes: enumMatches,
@@ -185,6 +328,7 @@ function main() {
 
   console.log(`  [OK] Schema validado: prisma/schema.prisma (PostgreSQL + DATABASE_URL + @map/@@map)`);
   console.log(`  [OK] Enums extraídos e exportados (TS, Python, JSON): ${parsedEnums.length}`);
+  console.log(`  [OK] Modelos Prisma exportados para TypeScript (BancoNexa/types/schema-models.ts): ${parsedModels.length}`);
   console.log(`  [OK] Tabelas 3FN catalogadas no manifesto SQL: ${tableMatches.length}`);
   console.log(`  [OK] Manifesto atualizado em: BancoNexa/migrations/migration-manifest.json\n`);
   console.log('✅ Geração de artefatos e tipos de banco concluída com sucesso!');

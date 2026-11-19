@@ -1,6 +1,6 @@
 // =============================================================================
 // PROJETO NEXA — SISTEMA INTELIGENTE DE MONITORAMENTO ACADÊMICO SENAI
-// CARDS: [DB-004] a [DB-009] Identidade, Perfis, Sessões e Auditoria (Lote 1)
+// CARDS: [DB-004] a [DB-019] Identidade, Auditoria, Estrutura Curricular, Matrículas e Constraints
 // =============================================================================
 // Convenção adotada:
 // - Modelos e Enums em PascalCase na camada de aplicação
@@ -227,7 +227,9 @@ model User {
   updatedAt    DateTime      @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
   profile      UserProfile?
   sessions     AuthSession[]
-  auditLogs    AuditLog[]
+  auditLogs          AuditLog[]
+  enrollments        Enrollment[]
+  teacherAssignments TeacherAssignment[]
 
   @@index([email], map: "idx_users_email")
   @@index([role, isActive], map: "idx_users_role_is_active")
@@ -287,4 +289,177 @@ model AuditLog {
   @@index([entity, entityId], map: "idx_audit_logs_entity_reference")
   @@index([userId, createdAt(sort: Desc)], map: "idx_audit_logs_user_created_at")
   @@map("audit_logs")
+}
+
+// =============================================================================
+// 4. TABELAS DE GESTÃO ACADÊMICA E ESTRUTURA SENAI (DB-011..DB-020)
+// =============================================================================
+
+/// Cursos técnicos profissionalizantes ofertados pela unidade SENAI (DB-011)
+model Course {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  code        String   @unique(map: "uq_courses_code") @map("code") @db.VarChar(30)
+  name        String   @map("name") @db.VarChar(150)
+  description String?  @map("description") @db.Text
+  totalHours  Int      @map("total_hours")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  classes     Class[]
+  subjects    Subject[]
+
+  @@index([code], map: "idx_courses_code")
+  @@index([name], map: "idx_courses_name")
+  @@index([isActive], map: "idx_courses_is_active")
+  @@map("courses")
+}
+
+/// Turmas acadêmicas letivas vinculadas a um curso técnico e período letivo (DB-012 / DB-019)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-019):
+/// - `chk_classes_date_range`: `CHECK (start_date < end_date)`
+/// - `chk_classes_max_students`: `CHECK (max_students > 0 AND max_students <= 100)`
+/// - `trg_classes_validate_max_students_reduction`: impede reduzir `max_students` abaixo das matrículas `ACTIVE`
+model Class {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  courseId    String      @map("course_id") @db.Uuid
+  code        String      @map("code") @db.VarChar(40)
+  period      String      @map("period") @db.VarChar(20)
+  shift       Shift       @map("shift")
+  maxStudents Int         @default(40) @map("max_students")
+  status      ClassStatus @default(PLANNING) @map("status")
+  startDate   DateTime    @map("start_date") @db.Date
+  endDate     DateTime    @map("end_date") @db.Date
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_classes_course")
+  enrollments        Enrollment[]
+  teacherAssignments TeacherAssignment[]
+
+  @@unique([code, period], map: "uq_classes_code_period")
+  @@index([courseId, period], map: "idx_classes_course_period")
+  @@index([status, period], map: "idx_classes_status_period")
+  @@index([shift], map: "idx_classes_shift")
+  @@map("classes")
+}
+
+/// Disciplinas teórico-práticas (Unidades Curriculares) da matriz do curso SENAI (DB-013)
+model Subject {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  courseId      String   @map("course_id") @db.Uuid
+  code          String   @map("code") @db.VarChar(50)
+  name          String   @map("name") @db.VarChar(150)
+  workloadHours Int      @map("workload_hours")
+  syllabus      String?  @map("syllabus") @db.Text
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_subjects_course")
+  learningModules    LearningModule[]
+  teacherAssignments TeacherAssignment[]
+
+  @@unique([courseId, code], map: "uq_subjects_course_code")
+  @@index([name], map: "idx_subjects_name")
+  @@index([courseId, isActive], map: "idx_subjects_course_active")
+  @@map("subjects")
+}
+
+/// Módulos de aprendizagem prática SENAI sequenciais dentro de uma disciplina (DB-014)
+model LearningModule {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  subjectId      String   @map("subject_id") @db.Uuid
+  title          String   @map("title") @db.VarChar(120)
+  orderIndex     Int      @map("order_index")
+  description    String?  @map("description") @db.Text
+  practicalHours Int      @map("practical_hours")
+  moduleWeight   Decimal  @default(1.00) @map("module_weight") @db.Decimal(4, 2)
+  passingScore   Decimal  @default(6.00) @map("passing_score") @db.Decimal(4, 2)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_learning_modules_subject")
+  moduleCompetencies ModuleCompetency[]
+
+  @@unique([subjectId, orderIndex], map: "uq_learning_modules_subject_order")
+  @@index([subjectId, orderIndex], map: "idx_learning_modules_subject_order")
+  @@index([title], map: "idx_learning_modules_title")
+  @@map("learning_modules")
+}
+
+/// Taxonomia de competências e habilidades técnicas industriais SENAI (DB-015)
+model Competency {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  code               String             @unique(map: "uq_competencies_code") @map("code") @db.VarChar(50)
+  title              String             @map("title") @db.VarChar(150)
+  category           CompetencyCategory @map("category")
+  description        String?            @map("description") @db.Text
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  moduleCompetencies ModuleCompetency[]
+
+  @@index([code], map: "idx_competencies_code")
+  @@index([category], map: "idx_competencies_category")
+  @@index([title], map: "idx_competencies_title")
+  @@map("competencies")
+}
+
+/// Relacionamento associativo N:M entre módulos práticos e competências técnicas SENAI (DB-016)
+model ModuleCompetency {
+  moduleId      String         @map("module_id") @db.Uuid
+  competencyId  String         @map("competency_id") @db.Uuid
+  weight        Decimal        @default(1.00) @map("weight") @db.Decimal(3, 2)
+  requiredLevel Int            @default(3) @map("required_level")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  module        LearningModule @relation(fields: [moduleId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_module_competencies_module")
+  competency    Competency     @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_module_competencies_competency")
+
+  @@id([moduleId, competencyId], map: "pk_module_competencies")
+  @@index([competencyId], map: "idx_module_competencies_competency")
+  @@index([moduleId, requiredLevel], map: "idx_module_competencies_module_level")
+  @@map("module_competencies")
+}
+
+/// Matrícula formal de um estudante (role = STUDENT) em uma turma acadêmica (DB-017 / DB-019)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-019):
+/// - `uq_enrollments_student_class`: `UNIQUE (student_id, class_id)`
+/// - `chk_enrollments_final_grade`: `CHECK (final_grade IS NULL OR (final_grade >= 0.00 AND final_grade <= 10.00))`
+/// - `chk_enrollments_attendance_rate`: `CHECK (attendance_rate IS NULL OR (attendance_rate >= 0.00 AND attendance_rate <= 100.00))`
+/// - `trg_enrollments_validate_student_role_and_touch`: exige `users.role = 'STUDENT'`
+/// - `trg_enrollments_enforce_class_capacity`: lock pessimista (`FOR UPDATE`) garantindo `COUNT(ACTIVE) <= classes.max_students`
+model Enrollment {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId      String           @map("student_id") @db.Uuid
+  classId        String           @map("class_id") @db.Uuid
+  enrollmentDate DateTime         @default(dbgenerated("CURRENT_DATE")) @map("enrollment_date") @db.Date
+  status         EnrollmentStatus @default(ACTIVE) @map("status")
+  finalGrade     Decimal?         @map("final_grade") @db.Decimal(4, 2)
+  attendanceRate Decimal?         @map("attendance_rate") @db.Decimal(5, 2)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  student        User             @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_student")
+  class          Class            @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_class")
+
+  @@unique([studentId, classId], map: "uq_enrollments_student_class")
+  @@index([attendanceRate], map: "idx_enrollments_attendance_rate")
+  @@index([classId, status], map: "idx_enrollments_class_status")
+  @@index([studentId, status], map: "idx_enrollments_student_status")
+  @@map("enrollments")
+}
+
+/// Associação de professores (role = TEACHER) a turmas e disciplinas para RBAC contextual (DB-018)
+model TeacherAssignment {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  teacherId     String   @map("teacher_id") @db.Uuid
+  classId       String   @map("class_id") @db.Uuid
+  subjectId     String   @map("subject_id") @db.Uuid
+  assignedAt    DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  isMainTeacher Boolean  @default(true) @map("is_main_teacher")
+  teacher       User     @relation(fields: [teacherId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_teacher_assignments_teacher")
+  class         Class    @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_teacher_assignments_class")
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_teacher_assignments_subject")
+
+  @@unique([teacherId, classId, subjectId], map: "uq_teacher_assignments_composite")
+  @@index([teacherId, classId], map: "idx_teacher_assignments_teacher_class")
+  @@index([classId, subjectId], map: "idx_teacher_assignments_class_subject")
+  @@index([subjectId], map: "idx_teacher_assignments_subject")
+  @@map("teacher_assignments")
 }

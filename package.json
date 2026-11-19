@@ -9,8 +9,9 @@
     "db:logs": "docker compose logs -f postgres",
     "db:migrate": "node scripts/db-migrate.js",
     "db:generate": "node scripts/db-generate.js",
+    "db:seed": "node prisma/seed.ts",
     "db:check": "node prisma/check-connection.ts",
-    "db:validate": "node scripts/validate-db-001.js && node scripts/validate-db-002.js && node scripts/validate-db-003.js && node scripts/validate-db-004.js && node scripts/validate-db-005.js && node scripts/validate-db-006.js && node scripts/validate-db-007.js && node scripts/validate-db-008.js && node scripts/validate-db-009.js && node scripts/validate-db-010.js"
+    "db:validate": "node scripts/validate-db-001.js && node scripts/validate-db-002.js && node scripts/validate-db-003.js && node scripts/validate-db-004.js && node scripts/validate-db-005.js && node scripts/validate-db-006.js && node scripts/validate-db-007.js && node scripts/validate-db-008.js && node scripts/validate-db-009.js && node scripts/validate-db-010.js && node scripts/validate-db-011.js && node scripts/validate-db-012.js && node scripts/validate-db-013.js && node scripts/validate-db-014.js && node scripts/validate-db-015.js && node scripts/validate-db-016.js && node scripts/validate-db-017.js && node scripts/validate-db-018.js && node scripts/validate-db-019.js && node scripts/validate-db-020.js"
   },
   "engines": {
     "node": ">=20.0.0"
