@@ -11,6 +11,14 @@ from app.services.auth_service import (
     REFRESH_TOKEN_REVOKED_REUSE_MESSAGE,
     get_auth_service,
 )
+from app.services.course_service import (
+    COURSE_CODE_CONFLICT_MESSAGE,
+    COURSE_DEACTIVATION_ACTIVE_CLASSES_MESSAGE,
+    COURSE_NOT_FOUND_MESSAGE,
+    CourseService,
+    CourseServiceDep,
+    get_course_service,
+)
 from app.services.health_service import (
     HealthService,
     HealthServiceDep,
@@ -20,6 +28,11 @@ from app.services.health_service import (
 __all__ = [
     "AuthService",
     "AuthServiceDep",
+    "COURSE_CODE_CONFLICT_MESSAGE",
+    "COURSE_DEACTIVATION_ACTIVE_CLASSES_MESSAGE",
+    "COURSE_NOT_FOUND_MESSAGE",
+    "CourseService",
+    "CourseServiceDep",
     "HealthService",
     "HealthServiceDep",
     "INVALID_CREDENTIALS_MESSAGE",
@@ -29,5 +42,6 @@ __all__ = [
     "REFRESH_TOKEN_MISSING_MESSAGE",
     "REFRESH_TOKEN_REVOKED_REUSE_MESSAGE",
     "get_auth_service",
+    "get_course_service",
     "get_health_service",
 ]
