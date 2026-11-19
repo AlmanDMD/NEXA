@@ -1,5 +1,7 @@
 """Modelo ORM SQLAlchemy 2.0 para a tabela de cursos técnicos SENAI (courses - DB-011)."""
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -9,9 +11,12 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.models.academic_class import AcademicClass
 
 
 class Course(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -46,6 +51,12 @@ class Course(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Boolean,
         default=True,
         nullable=False,
+    )
+
+    classes: Mapped[list["AcademicClass"]] = relationship(
+        "AcademicClass",
+        back_populates="course",
+        passive_deletes=True,
     )
 
     @validates("code")

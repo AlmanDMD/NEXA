@@ -1,6 +1,7 @@
 """Testes unitários e de integração para Endpoints CRUD de Cursos Técnicos SENAI (BE-011)."""
 
 from collections.abc import AsyncIterator, Generator
+from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,10 +20,10 @@ from app.core import (
     get_password_hasher,
 )
 from app.main import create_app
-from app.models import Base, Course, User
+from app.models import AcademicClass, Base, Course, User
 from app.repositories.auth_repository import AuthRepository
 from app.repositories.course_repository import CourseRepository
-from app.schemas.enums import ClassStatus, UserRole
+from app.schemas.enums import ClassStatus, Shift, UserRole
 from app.schemas.user import UserProfileCreateSchema
 from app.services.course_service import (
     COURSE_CODE_CONFLICT_MESSAGE,
@@ -140,20 +141,6 @@ def _create_course_in_db(
             total_hours=total_hours,
             is_active=is_active,
         )
-
-
-def _create_auxiliary_classes_table(engine: sa.Engine) -> sa.Table:
-    """Cria uma tabela auxiliar 'classes' em MetaData separada para validar bloqueio com turmas ativas."""
-    aux_metadata = sa.MetaData()
-    classes_table = sa.Table(
-        "classes",
-        aux_metadata,
-        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True),
-        sa.Column("course_id", sa.Uuid(as_uuid=True), nullable=False),
-        sa.Column("status", sa.String(30), nullable=False),
-    )
-    aux_metadata.create_all(bind=engine)
-    return classes_table
 
 
 def test_course_orm_model_validations() -> None:
@@ -671,12 +658,10 @@ async def test_soft_delete_course_sets_is_active_false_and_preserves_record(
 
 async def test_deactivate_course_blocked_when_active_classes_exist(
     courses_client: AsyncClient,
-    db_engine: sa.Engine,
     db_session_factory: sessionmaker[Session],
     fast_hasher: PasswordHasher,
 ) -> None:
     """Observação Técnica: Impedir desativação (DELETE e PUT is_active=False) se houver turmas ACTIVE vinculadas."""
-    classes_table = _create_auxiliary_classes_table(db_engine)
     course_with_active = _create_course_in_db(
         db_session_factory,
         code="TEC-MEC-01",
@@ -688,32 +673,52 @@ async def test_deactivate_course_blocked_when_active_classes_exist(
         name="Técnico em Eletromecânica",
     )
 
-    with db_engine.begin() as conn:
-        conn.execute(
-            classes_table.insert(),
+    with db_session_factory() as session:
+        session.add_all(
             [
-                {
-                    "id": uuid4(),
-                    "course_id": course_with_active.id,
-                    "status": ClassStatus.ACTIVE.value,
-                },
-                {
-                    "id": uuid4(),
-                    "course_id": course_with_inactive_classes.id,
-                    "status": ClassStatus.COMPLETED.value,
-                },
-                {
-                    "id": uuid4(),
-                    "course_id": course_with_inactive_classes.id,
-                    "status": ClassStatus.PLANNING.value,
-                },
-                {
-                    "id": uuid4(),
-                    "course_id": course_with_inactive_classes.id,
-                    "status": ClassStatus.ARCHIVED.value,
-                },
-            ],
+                AcademicClass(
+                    course_id=course_with_active.id,
+                    code="MEC-2026-1T",
+                    period="2026.1",
+                    shift=Shift.MORNING,
+                    max_students=40,
+                    status=ClassStatus.ACTIVE,
+                    start_date=date(2026, 2, 2),
+                    end_date=date(2026, 6, 30),
+                ),
+                AcademicClass(
+                    course_id=course_with_inactive_classes.id,
+                    code="ELT-2025-2T",
+                    period="2025.2",
+                    shift=Shift.AFTERNOON,
+                    max_students=35,
+                    status=ClassStatus.COMPLETED,
+                    start_date=date(2025, 8, 1),
+                    end_date=date(2025, 12, 15),
+                ),
+                AcademicClass(
+                    course_id=course_with_inactive_classes.id,
+                    code="ELT-2026-2T",
+                    period="2026.2",
+                    shift=Shift.NIGHT,
+                    max_students=35,
+                    status=ClassStatus.PLANNING,
+                    start_date=date(2026, 8, 3),
+                    end_date=date(2026, 12, 18),
+                ),
+                AcademicClass(
+                    course_id=course_with_inactive_classes.id,
+                    code="ELT-2024-1T",
+                    period="2024.1",
+                    shift=Shift.MORNING,
+                    max_students=30,
+                    status=ClassStatus.ARCHIVED,
+                    start_date=date(2024, 2, 5),
+                    end_date=date(2024, 6, 28),
+                ),
+            ]
         )
+        session.commit()
 
     _, coord_token = _create_user_and_token(
         db_session_factory, fast_hasher, role=UserRole.COORDINATOR, suffix="cls"
