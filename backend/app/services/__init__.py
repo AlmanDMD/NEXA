@@ -1,5 +1,17 @@
 """Camada de services (regras de negócio da aplicação)."""
 
+from app.services.academic_class_service import (
+    AcademicClassService,
+    AcademicClassServiceDep,
+    CLASS_ACTIVATION_INACTIVE_COURSE_MESSAGE,
+    CLASS_CODE_PERIOD_CONFLICT_MESSAGE,
+    CLASS_COURSE_NOT_FOUND_MESSAGE,
+    CLASS_INACTIVE_COURSE_MESSAGE,
+    CLASS_NOT_FOUND_MESSAGE,
+    CLASS_REOPEN_FORBIDDEN_MESSAGE,
+    CLASS_TEACHER_FORBIDDEN_MESSAGE,
+    get_academic_class_service,
+)
 from app.services.auth_service import (
     AuthService,
     AuthServiceDep,
@@ -26,8 +38,17 @@ from app.services.health_service import (
 )
 
 __all__ = [
+    "AcademicClassService",
+    "AcademicClassServiceDep",
     "AuthService",
     "AuthServiceDep",
+    "CLASS_ACTIVATION_INACTIVE_COURSE_MESSAGE",
+    "CLASS_CODE_PERIOD_CONFLICT_MESSAGE",
+    "CLASS_COURSE_NOT_FOUND_MESSAGE",
+    "CLASS_INACTIVE_COURSE_MESSAGE",
+    "CLASS_NOT_FOUND_MESSAGE",
+    "CLASS_REOPEN_FORBIDDEN_MESSAGE",
+    "CLASS_TEACHER_FORBIDDEN_MESSAGE",
     "COURSE_CODE_CONFLICT_MESSAGE",
     "COURSE_DEACTIVATION_ACTIVE_CLASSES_MESSAGE",
     "COURSE_NOT_FOUND_MESSAGE",
@@ -41,6 +62,7 @@ __all__ = [
     "REFRESH_TOKEN_INVALID_MESSAGE",
     "REFRESH_TOKEN_MISSING_MESSAGE",
     "REFRESH_TOKEN_REVOKED_REUSE_MESSAGE",
+    "get_academic_class_service",
     "get_auth_service",
     "get_course_service",
     "get_health_service",

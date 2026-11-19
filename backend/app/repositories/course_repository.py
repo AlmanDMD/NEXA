@@ -5,20 +5,16 @@ from uuid import UUID
 
 from fastapi import Depends
 from sqlalchemy import (
-    String,
-    Uuid,
-    cast,
-    column,
     func,
     inspect,
     literal,
     or_,
     select,
-    table,
 )
 from sqlalchemy.orm import Session
 
 from app.core.database import DbSessionDep
+from app.models.academic_class import AcademicClass
 from app.models.base import _utc_now
 from app.models.course import Course
 from app.schemas.enums import ClassStatus
@@ -129,20 +125,15 @@ class CourseRepository:
     def has_active_classes(self, course_id: UUID) -> bool:
         """Verifica se existem turmas ativas vinculadas ao curso na tabela 'classes'."""
         bind = self._session.get_bind()
-        if not inspect(bind).has_table("classes"):
+        if not inspect(bind).has_table(AcademicClass.__tablename__):
             return False
 
-        classes_tbl = table(
-            "classes",
-            column("course_id", Uuid(as_uuid=True)),
-            column("status", String),
-        )
         stmt = (
             select(literal(1))
-            .select_from(classes_tbl)
+            .select_from(AcademicClass)
             .where(
-                classes_tbl.c.course_id == course_id,
-                cast(classes_tbl.c.status, String) == ClassStatus.ACTIVE.value,
+                AcademicClass.course_id == course_id,
+                AcademicClass.status == ClassStatus.ACTIVE,
             )
             .limit(1)
         )
