@@ -10,6 +10,7 @@ from pydantic import BeforeValidator, Field, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.schemas.base import BaseResponseSchema, EntityResponseSchema, StrictRequestSchema
+from app.schemas.competency import ModuleCompetencyResponseSchema
 from app.schemas.validators import sanitize_optional_text, sanitize_text
 
 _INT_PATTERN: re.Pattern[str] = re.compile(r"^[+-]?\d+$")
@@ -315,6 +316,11 @@ class LearningModuleResponseSchema(EntityResponseSchema):
     )
     subject: SubjectSummarySchema = Field(
         description="Resumo da disciplina técnica vinculada ao módulo prático",
+    )
+    competencies: list[ModuleCompetencyResponseSchema] = Field(
+        default_factory=list,
+        validation_alias="module_competencies",
+        description="Competências técnicas associadas ao módulo prático",
     )
 
     @field_validator("module_weight", "passing_score", mode="after")

@@ -15,10 +15,11 @@ from sqlalchemy import (
     select,
     table,
 )
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.learning_module import LearningModule
+from app.models.module_competency import ModuleCompetency
 
 
 class LearningModuleRepository:
@@ -33,10 +34,15 @@ class LearningModuleRepository:
         return self._session
 
     def get_by_id(self, module_id: UUID) -> LearningModule | None:
-        """Busca um módulo prático pelo seu UUID com carregamento da disciplina vinculada."""
+        """Busca um módulo prático pelo seu UUID com carregamento da disciplina e competências."""
         stmt = (
             select(LearningModule)
-            .options(joinedload(LearningModule.subject))
+            .options(
+                joinedload(LearningModule.subject),
+                selectinload(LearningModule.module_competencies).joinedload(
+                    ModuleCompetency.competency
+                ),
+            )
             .where(LearningModule.id == module_id)
         )
         return self._session.scalar(stmt)
@@ -49,7 +55,12 @@ class LearningModuleRepository:
         """Busca um módulo prático pelo par único (subject_id, order_index)."""
         stmt = (
             select(LearningModule)
-            .options(joinedload(LearningModule.subject))
+            .options(
+                joinedload(LearningModule.subject),
+                selectinload(LearningModule.module_competencies).joinedload(
+                    ModuleCompetency.competency
+                ),
+            )
             .where(
                 LearningModule.subject_id == subject_id,
                 LearningModule.order_index == order_index,
@@ -92,7 +103,12 @@ class LearningModuleRepository:
         total = int(self._session.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
         offset = (page - 1) * limit
         items_stmt = (
-            stmt.options(joinedload(LearningModule.subject))
+            stmt.options(
+                joinedload(LearningModule.subject),
+                selectinload(LearningModule.module_competencies).joinedload(
+                    ModuleCompetency.competency
+                ),
+            )
             .order_by(LearningModule.order_index.asc(), LearningModule.created_at.asc())
             .offset(offset)
             .limit(limit)

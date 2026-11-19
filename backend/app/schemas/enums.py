@@ -47,8 +47,17 @@ class ClassStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class CompetencyCategory(StrEnum):
+    """Categorias da taxonomia de competências técnicas SENAI — 'competency_category_enum'."""
+
+    TECHNICAL = "TECHNICAL"
+    SAFETY = "SAFETY"
+    PROCEDURAL = "PROCEDURAL"
+
+
 __all__ = [
     "ClassStatus",
+    "CompetencyCategory",
     "EnrollmentStatus",
     "RiskLevel",
     "Shift",
