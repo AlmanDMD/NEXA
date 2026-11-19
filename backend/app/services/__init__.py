@@ -36,6 +36,15 @@ from app.services.health_service import (
     HealthServiceDep,
     get_health_service,
 )
+from app.services.learning_module_service import (
+    LEARNING_MODULE_INACTIVE_SUBJECT_MESSAGE,
+    LEARNING_MODULE_ORDER_CONFLICT_MESSAGE,
+    LEARNING_MODULE_SUBJECT_NOT_FOUND_MESSAGE,
+    LEARNING_MODULE_TEACHER_FORBIDDEN_MESSAGE,
+    LearningModuleService,
+    LearningModuleServiceDep,
+    get_learning_module_service,
+)
 from app.services.subject_service import (
     SUBJECT_ACTIVATION_INACTIVE_COURSE_MESSAGE,
     SUBJECT_CODE_COURSE_CONFLICT_MESSAGE,
@@ -67,7 +76,13 @@ __all__ = [
     "HealthService",
     "HealthServiceDep",
     "INVALID_CREDENTIALS_MESSAGE",
+    "LEARNING_MODULE_INACTIVE_SUBJECT_MESSAGE",
+    "LEARNING_MODULE_ORDER_CONFLICT_MESSAGE",
+    "LEARNING_MODULE_SUBJECT_NOT_FOUND_MESSAGE",
+    "LEARNING_MODULE_TEACHER_FORBIDDEN_MESSAGE",
     "LOGOUT_SUCCESS_MESSAGE",
+    "LearningModuleService",
+    "LearningModuleServiceDep",
     "REFRESH_TOKEN_EXPIRED_MESSAGE",
     "REFRESH_TOKEN_INVALID_MESSAGE",
     "REFRESH_TOKEN_MISSING_MESSAGE",
@@ -83,5 +98,6 @@ __all__ = [
     "get_auth_service",
     "get_course_service",
     "get_health_service",
+    "get_learning_module_service",
     "get_subject_service",
 ]
