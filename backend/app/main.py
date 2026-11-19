@@ -13,6 +13,7 @@ from app.routers.auth import router as auth_router
 from app.routers.classes import router as classes_router
 from app.routers.courses import router as courses_router
 from app.routers.health import router as health_router
+from app.routers.subjects import router as subjects_router
 
 
 @asynccontextmanager
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     application.include_router(auth_router)
     application.include_router(courses_router)
     application.include_router(classes_router)
+    application.include_router(subjects_router)
 
     return application
 

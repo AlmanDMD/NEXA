@@ -36,6 +36,16 @@ from app.services.health_service import (
     HealthServiceDep,
     get_health_service,
 )
+from app.services.subject_service import (
+    SUBJECT_ACTIVATION_INACTIVE_COURSE_MESSAGE,
+    SUBJECT_CODE_COURSE_CONFLICT_MESSAGE,
+    SUBJECT_COURSE_NOT_FOUND_MESSAGE,
+    SUBJECT_INACTIVE_COURSE_MESSAGE,
+    SUBJECT_NOT_FOUND_MESSAGE,
+    SubjectService,
+    SubjectServiceDep,
+    get_subject_service,
+)
 
 __all__ = [
     "AcademicClassService",
@@ -62,8 +72,16 @@ __all__ = [
     "REFRESH_TOKEN_INVALID_MESSAGE",
     "REFRESH_TOKEN_MISSING_MESSAGE",
     "REFRESH_TOKEN_REVOKED_REUSE_MESSAGE",
+    "SUBJECT_ACTIVATION_INACTIVE_COURSE_MESSAGE",
+    "SUBJECT_CODE_COURSE_CONFLICT_MESSAGE",
+    "SUBJECT_COURSE_NOT_FOUND_MESSAGE",
+    "SUBJECT_INACTIVE_COURSE_MESSAGE",
+    "SUBJECT_NOT_FOUND_MESSAGE",
+    "SubjectService",
+    "SubjectServiceDep",
     "get_academic_class_service",
     "get_auth_service",
     "get_course_service",
     "get_health_service",
+    "get_subject_service",
 ]

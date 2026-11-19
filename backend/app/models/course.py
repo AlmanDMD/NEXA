@@ -17,6 +17,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.models.academic_class import AcademicClass
+    from app.models.subject import Subject
 
 
 class Course(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -55,6 +56,11 @@ class Course(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     classes: Mapped[list["AcademicClass"]] = relationship(
         "AcademicClass",
+        back_populates="course",
+        passive_deletes=True,
+    )
+    subjects: Mapped[list["Subject"]] = relationship(
+        "Subject",
         back_populates="course",
         passive_deletes=True,
     )

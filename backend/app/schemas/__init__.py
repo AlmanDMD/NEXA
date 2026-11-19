@@ -59,6 +59,20 @@ from app.schemas.enums import (
 )
 from app.schemas.error import ErrorDetail, ErrorResponse
 from app.schemas.health import HealthResponse
+from app.schemas.subject import (
+    PositiveWorkloadHoursInt,
+    SubjectCodeStr,
+    SubjectCreateSchema,
+    SubjectListParamsDep,
+    SubjectListQueryParams,
+    SubjectNameStr,
+    SubjectPaginatedResponseSchema,
+    SubjectResponseSchema,
+    SubjectUpdateSchema,
+    validate_subject_code_pt,
+    validate_subject_name_pt,
+    validate_subject_workload_hours_pt,
+)
 from app.schemas.user import (
     UserCreateSchema,
     UserProfileCreateSchema,
@@ -126,6 +140,7 @@ __all__ = [
     "PaginationQueryParams",
     "PositiveHoursInt",
     "PositiveIntPathParam",
+    "PositiveWorkloadHoursInt",
     "RefreshTokenResponseSchema",
     "RegistrationNumberStr",
     "RiskLevel",
@@ -133,6 +148,14 @@ __all__ = [
     "Shift",
     "StrictRequestSchema",
     "StrongPasswordStr",
+    "SubjectCodeStr",
+    "SubjectCreateSchema",
+    "SubjectListParamsDep",
+    "SubjectListQueryParams",
+    "SubjectNameStr",
+    "SubjectPaginatedResponseSchema",
+    "SubjectResponseSchema",
+    "SubjectUpdateSchema",
     "TimestampResponseMixin",
     "TokenResponseSchema",
     "UUIDPathParam",
@@ -157,4 +180,7 @@ __all__ = [
     "validate_phone_pt",
     "validate_registration_number_pt",
     "validate_strong_password_pt",
+    "validate_subject_code_pt",
+    "validate_subject_name_pt",
+    "validate_subject_workload_hours_pt",
 ]

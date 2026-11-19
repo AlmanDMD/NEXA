@@ -15,6 +15,11 @@ from app.repositories.course_repository import (
     CourseRepositoryDep,
     get_course_repository,
 )
+from app.repositories.subject_repository import (
+    SubjectRepository,
+    SubjectRepositoryDep,
+    get_subject_repository,
+)
 
 __all__ = [
     "AcademicClassRepository",
@@ -23,7 +28,10 @@ __all__ = [
     "AuthRepositoryDep",
     "CourseRepository",
     "CourseRepositoryDep",
+    "SubjectRepository",
+    "SubjectRepositoryDep",
     "get_academic_class_repository",
     "get_auth_repository",
     "get_course_repository",
+    "get_subject_repository",
 ]
