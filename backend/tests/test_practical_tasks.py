@@ -1,0 +1,811 @@
+"""Testes unitários e de integração para Atividades Práticas e Critérios de Tolerância (BE-024)."""
+
+from collections.abc import AsyncIterator, Generator
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+from uuid import UUID, uuid4
+
+from fastapi import FastAPI, status
+from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
+import pytest
+import sqlalchemy as sa
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.core import (
+    PasswordHasher,
+    create_access_token,
+    get_db,
+    get_password_hasher,
+)
+from app.main import create_app
+from app.models import (
+    AcademicClass,
+    Base,
+    Competency,
+    Course,
+    Enrollment,
+    LearningModule,
+    ModuleCompetency,
+    PracticalTask,
+    Subject,
+    TaskCriterion,
+    TaskSubmission,
+    TeacherAssignment,
+    User,
+)
+from app.repositories.academic_class_repository import AcademicClassRepository
+from app.repositories.auth_repository import AuthRepository
+from app.repositories.competency_repository import CompetencyRepository
+from app.repositories.course_repository import CourseRepository
+from app.repositories.learning_module_repository import LearningModuleRepository
+from app.repositories.subject_repository import SubjectRepository
+from app.schemas.enums import (
+    ClassStatus,
+    CompetencyCategory,
+    EnrollmentStatus,
+    Shift,
+    SubmissionStatus,
+    UserRole,
+)
+from app.schemas.practical_task import (
+    PracticalTaskCreateSchema,
+    validate_blueprint_url_pt,
+    validate_practical_task_due_date_pt,
+    validate_practical_task_max_score_pt,
+    validate_practical_task_title_pt,
+    validate_task_criterion_name_pt,
+)
+from app.schemas.user import UserProfileCreateSchema
+from app.services.practical_task_service import (
+    PRACTICAL_TASK_CLASS_NOT_FOUND_MESSAGE,
+    PRACTICAL_TASK_COMPETENCY_NOT_FOUND_MESSAGE,
+    PRACTICAL_TASK_INACTIVE_CLASS_MESSAGE,
+    PRACTICAL_TASK_INACTIVE_SUBJECT_MESSAGE,
+    PRACTICAL_TASK_MODULE_COURSE_MISMATCH_MESSAGE,
+    PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE,
+    PRACTICAL_TASK_MODULE_TEACHER_FORBIDDEN_MESSAGE,
+    PRACTICAL_TASK_TEACHER_FORBIDDEN_MESSAGE,
+)
+
+
+@pytest.fixture
+def db_engine(tmp_path: Path) -> Generator[sa.Engine, None, None]:
+    """Cria uma engine SQLite isolada por teste com modo WAL."""
+    db_file = tmp_path / "practical_tasks_test.db"
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite_pragma(dbapi_connection: Any, _connection_record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
+    Base.metadata.create_all(bind=engine)
+    try:
+        yield engine
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+@pytest.fixture
+def db_session_factory(db_engine: sa.Engine) -> sessionmaker[Session]:
+    """Cria a fábrica de sessões SQLAlchemy acoplada à engine isolada."""
+    return sessionmaker(
+        bind=db_engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+
+@pytest.fixture
+def fast_hasher() -> PasswordHasher:
+    """Instância rápida do PasswordHasher (rounds=4) para agilizar os testes."""
+    return PasswordHasher(rounds=4)
+
+
+@pytest.fixture
+def tasks_app(
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> FastAPI:
+    """Instância FastAPI com dependências de banco e hasher sobrescritas."""
+    application = create_app()
+
+    def override_get_db() -> Generator[Session, None, None]:
+        db = db_session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    application.dependency_overrides[get_db] = override_get_db
+    application.dependency_overrides[get_password_hasher] = lambda: fast_hasher
+    return application
+
+
+@pytest.fixture
+async def tasks_client(tasks_app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """Cliente HTTP assíncrono acoplado à aplicação FastAPI."""
+    transport = ASGITransport(app=tasks_app)
+    async with AsyncClient(transport=transport, base_url="https://testserver") as client:
+        yield client
+
+
+def _create_user_and_token(
+    session_factory: sessionmaker[Session],
+    hasher: PasswordHasher,
+    *,
+    role: UserRole,
+    suffix: str,
+    full_name: str | None = None,
+    registration_number: str | None = None,
+) -> tuple[User, str]:
+    """Cria usuário persistido no banco de testes e gera Access Token JWT."""
+    with session_factory() as session:
+        repo = AuthRepository(session=session)
+        user = repo.create_user(
+            email=f"{role.value.lower()}.{suffix}@senai.br",
+            password_hash=hasher.hash_password("Senai@2026!Secret"),
+            role=role,
+            is_active=True,
+            profile_data=UserProfileCreateSchema(
+                full_name=full_name or f"Usuário {role.value} {suffix}",
+                registration_number=registration_number
+                or f"SENAI-{role.value[:3]}-{suffix.upper()}",
+                phone="(11) 98888-7777",
+            ),
+        )
+    token = create_access_token(subject=user.id, email=user.email, role=user.role)
+    return user, token
+
+
+def test_practical_task_criteria_and_submission_orm_validations(
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida regras ORM e constraints de PracticalTask (DB-023), TaskCriterion (DB-024) e TaskSubmission (DB-025)."""
+    student, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="ormtask01",
+    )
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-USI-024",
+            name="Técnico em Usinagem Mecânica",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="USI-2026-1T",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-101",
+            name="Tornearia Mecânica",
+            workload_hours=80,
+            syllabus="Torneamento cilíndrico e cônico",
+            is_active=True,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Tornearia de Precisão",
+            order_index=1,
+            practical_hours=40,
+            description="Operação de torno",
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp = CompetencyRepository(session).create(
+            code="COMP-TOR-024",
+            title="Controle Dimensional com Micrômetro",
+            category=CompetencyCategory.TECHNICAL,
+            description="Tolerância ISO H7",
+        )
+        enrollment = Enrollment(
+            student_id=student.id,
+            class_id=academic_class.id,
+            enrollment_date=date(2026, 2, 1),
+            status=EnrollmentStatus.ACTIVE,
+        )
+        session.add(enrollment)
+        session.commit()
+
+        # Validações de erro em PracticalTask
+        with pytest.raises(ValueError, match="entre 3 e 150 caracteres"):
+            PracticalTask(
+                module_id=module.id,
+                class_id=academic_class.id,
+                title="AB",
+                due_date=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+            )
+
+        with pytest.raises(ValueError, match="entre 1.00 e 10.00"):
+            PracticalTask(
+                module_id=module.id,
+                class_id=academic_class.id,
+                title="Eixo Escalonado H7",
+                due_date=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+                max_score=Decimal("0.50"),
+            )
+
+        with pytest.raises(ValueError, match="iniciando com http:// ou https://"):
+            PracticalTask(
+                module_id=module.id,
+                class_id=academic_class.id,
+                title="Eixo Escalonado H7",
+                due_date=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+                blueprint_url="ftp://desenho.invalido/eixo.pdf",
+            )
+
+        task = PracticalTask(
+            module_id=module.id,
+            class_id=academic_class.id,
+            title="  Usinagem de Eixo Escalonado Ø25mm H7  ",
+            description="  Peça prática em aço SAE 1045  ",
+            blueprint_url="https://cdn.senai.br/blueprints/eixo-h7.pdf",
+            due_date=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+            max_score=Decimal("10.00"),
+            is_mandatory=True,
+        )
+        session.add(task)
+        session.flush()
+        assert task.title == "Usinagem de Eixo Escalonado Ø25mm H7"
+
+        # Validações de erro em TaskCriterion
+        with pytest.raises(ValueError, match="entre 1 e 5"):
+            TaskCriterion(
+                task_id=task.id,
+                competency_id=comp.id,
+                criterion_name="Tolerância Dimensional ±0,02mm",
+                weight=Decimal("1.00"),
+                min_acceptable_level=6,
+            )
+
+        criterion = TaskCriterion(
+            task_id=task.id,
+            competency_id=comp.id,
+            criterion_name="  Tolerância Dimensional ±0,02mm no Micrômetro  ",
+            weight=Decimal("2.00"),
+            min_acceptable_level=4,
+        )
+        session.add(criterion)
+
+        sub1 = TaskSubmission(
+            task_id=task.id,
+            student_id=student.id,
+            enrollment_id=enrollment.id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(sub1)
+        session.commit()
+
+        # Constraint UNIQUE (task_id, student_id)
+        sub_dup = TaskSubmission(
+            task_id=task.id,
+            student_id=student.id,
+            enrollment_id=enrollment.id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(sub_dup)
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_pydantic_validators_for_practical_tasks_and_criteria() -> None:
+    """Valida schemas e validadores Pydantic v2 para criação de tarefa prática e rubricas."""
+    assert validate_practical_task_title_pt("  Torneamento Cilíndrico  ") == "Torneamento Cilíndrico"
+    assert validate_task_criterion_name_pt("  Acabamento Superficial Ra 1,6  ") == "Acabamento Superficial Ra 1,6"
+    assert validate_blueprint_url_pt("https://senai.br/folha.pdf") == "https://senai.br/folha.pdf"
+    assert validate_blueprint_url_pt("   ") is None
+    assert validate_practical_task_max_score_pt("8.5") == Decimal("8.50")
+
+    dt_from_date = validate_practical_task_due_date_pt("2026-05-10")
+    assert dt_from_date.year == 2026 and dt_from_date.month == 5 and dt_from_date.day == 10
+
+    # Suporta tanto 'criteria' quanto 'task_criteria'
+    comp_id = uuid4()
+    schema_via_alias = PracticalTaskCreateSchema.model_validate(
+        {
+            "module_id": str(uuid4()),
+            "class_id": str(uuid4()),
+            "title": "Usinagem de Bucha Guia",
+            "due_date": "2026-05-15T18:00:00Z",
+            "task_criteria": [
+                {
+                    "competency_id": str(comp_id),
+                    "criterion_name": "Tolerância Interna H7",
+                    "weight": "1.50",
+                    "min_acceptable_level": 3,
+                }
+            ],
+        }
+    )
+    assert len(schema_via_alias.criteria) == 1
+    assert schema_via_alias.criteria[0].weight == Decimal("1.50")
+
+    # Rejeita critérios com nomes duplicados no mesmo payload
+    with pytest.raises(ValidationError, match="nomes duplicados"):
+        PracticalTaskCreateSchema.model_validate(
+            {
+                "module_id": str(uuid4()),
+                "class_id": str(uuid4()),
+                "title": "Usinagem de Bucha Guia",
+                "due_date": "2026-05-15T18:00:00Z",
+                "criteria": [
+                    {
+                        "competency_id": str(comp_id),
+                        "criterion_name": "Tolerância Interna H7",
+                    },
+                    {
+                        "competency_id": str(comp_id),
+                        "criterion_name": "tolerância interna h7",
+                    },
+                ],
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_practical_task_validates_competencies_and_generates_pending_submissions(
+    tasks_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida POST /api/v1/practical-tasks: cria rubricas, valida competências e gera submissões PENDING (BE-024)."""
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="create024",
+        full_name="Instrutor Tornearia",
+        registration_number="SENAI-PRF-0240",
+    )
+    stu_active_1, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stu1_024",
+    )
+    stu_active_2, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stu2_024",
+    )
+    stu_dropped, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="studrop_024",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-MEC-024",
+            name="Técnico em Mecânica de Precisão",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2026-024",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="USI-024",
+            name="Usinagem em Torno e Fresadora",
+            workload_hours=80,
+            syllabus="Operações de bancada e usinagem",
+            is_active=True,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Tornearia Cilíndrica e Faceamento",
+            order_index=1,
+            practical_hours=40,
+            description="Módulo prático de tornearia",
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp_dim = CompetencyRepository(session).create(
+            code="COMP-DIM-024",
+            title="Controle Dimensional com Micrômetro Externo",
+            category=CompetencyCategory.TECHNICAL,
+            description="Tolerância ±0,02mm",
+        )
+        comp_seg = CompetencyRepository(session).create(
+            code="COMP-NR12-024",
+            title="Segurança Operacional NR-12 em Torno Mecânico",
+            category=CompetencyCategory.SAFETY,
+            description="Uso de EPI e proteções",
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subject.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=stu_active_1.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=stu_active_2.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=stu_dropped.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.DROPPED,
+                ),
+            ]
+        )
+        session.commit()
+
+    # 1. Competência inexistente nas rubricas -> HTTP 404 Not Found e rollback integral
+    bad_comp_res = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(module.id),
+            "class_id": str(academic_class.id),
+            "title": "Peça com Competência Inexistente",
+            "due_date": "2026-04-25T18:00:00Z",
+            "criteria": [
+                {
+                    "competency_id": str(comp_dim.id),
+                    "criterion_name": "Medição de Diâmetro Externo",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                },
+                {
+                    "competency_id": str(uuid4()),
+                    "criterion_name": "Rubrica Inválida",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert bad_comp_res.status_code == status.HTTP_404_NOT_FOUND
+    assert bad_comp_res.json()["message"] == PRACTICAL_TASK_COMPETENCY_NOT_FOUND_MESSAGE
+
+    # 2. Criação válida com 2 rubricas -> HTTP 201 Created e 2 entregas PENDING (apenas alunos ACTIVE)
+    create_res = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(module.id),
+            "class_id": str(academic_class.id),
+            "title": "Usinagem de Eixo Escalonado Ø25mm H7",
+            "description": "Faceamento, desbaste e acabamento com tolerância H7.",
+            "blueprint_url": "https://cdn.senai.br/blueprints/eixo-escalonado-25h7.pdf",
+            "due_date": "2026-04-25T18:00:00Z",
+            "max_score": "10.00",
+            "is_mandatory": True,
+            "task_criteria": [
+                {
+                    "competency_id": str(comp_dim.id),
+                    "criterion_name": "Tolerância Dimensional ±0,02mm no Micrômetro",
+                    "weight": "2.00",
+                    "min_acceptable_level": 4,
+                },
+                {
+                    "competency_id": str(comp_seg.id),
+                    "criterion_name": "Procedimento de Segurança NR-12 e Uso de Óculos/EPI",
+                    "weight": "1.00",
+                    "min_acceptable_level": 5,
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert create_res.status_code == status.HTTP_201_CREATED
+    body = create_res.json()
+    task_id = UUID(body["id"])
+
+    assert body["title"] == "Usinagem de Eixo Escalonado Ø25mm H7"
+    assert body["module_id"] == str(module.id)
+    assert body["class_id"] == str(academic_class.id)
+    assert body["max_score"] == "10.00"
+    assert body["is_mandatory"] is True
+    assert body["initialized_submissions_count"] == 2
+    assert body["total_submissions_count"] == 2
+    assert body["pending_submissions_count"] == 2
+    assert body["completed_submissions_count"] == 0
+    assert len(body["criteria"]) == 2
+    assert len(body["task_criteria"]) == 2
+
+    # Verifica registros persistidos em task_submissions e vínculo em module_competencies no banco
+    with db_session_factory() as session:
+        subs = list(
+            session.scalars(
+                select(TaskSubmission).where(TaskSubmission.task_id == task_id)
+            ).all()
+        )
+        assert len(subs) == 2
+        assert {sub.student_id for sub in subs} == {stu_active_1.id, stu_active_2.id}
+        assert all(sub.status == SubmissionStatus.PENDING for sub in subs)
+
+        mod_links = list(
+            session.scalars(
+                select(ModuleCompetency).where(ModuleCompetency.module_id == module.id)
+            ).all()
+        )
+        assert {link.competency_id for link in mod_links} == {comp_dim.id, comp_seg.id}
+
+
+@pytest.mark.asyncio
+async def test_list_module_practical_tasks_filters_rbac_and_domain_errors(
+    tasks_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida GET /api/v1/modules/{module_id}/practical-tasks, filtros, RBAC docente e erros 401/403/404/422."""
+    admin, admin_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.ADMIN,
+        suffix="adm024",
+    )
+    assigned_teacher, assigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchr_ok_024",
+    )
+    unassigned_teacher, unassigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchr_out_024",
+    )
+    _student, student_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stu_rbac_024",
+    )
+
+    with db_session_factory() as session:
+        course_1 = CourseRepository(session).create(
+            code="TEC-AUT-024",
+            name="Técnico em Automação",
+            description="Curso 1",
+            total_hours=1200,
+            is_active=True,
+        )
+        course_2 = CourseRepository(session).create(
+            code="TEC-ELT-024",
+            name="Técnico em Eletrotécnica",
+            description="Curso 2",
+            total_hours=1200,
+            is_active=True,
+        )
+        active_class = AcademicClassRepository(session).create(
+            course_id=course_1.id,
+            code="AUT-2026-1A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        planning_class = AcademicClassRepository(session).create(
+            course_id=course_1.id,
+            code="AUT-2026-1P",
+            period="2026.1",
+            shift=Shift.AFTERNOON,
+            max_students=30,
+            status=ClassStatus.PLANNING,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        other_course_class = AcademicClassRepository(session).create(
+            course_id=course_2.id,
+            code="ELT-2026-1A",
+            period="2026.1",
+            shift=Shift.NIGHT,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course_1.id,
+            code="MET-024",
+            name="Metrologia Dimensional",
+            workload_hours=60,
+            syllabus="Paquímetro e micrômetro",
+            is_active=True,
+        )
+        inactive_subject = SubjectRepository(session).create(
+            course_id=course_1.id,
+            code="INA-024",
+            name="Disciplina Inativa",
+            workload_hours=40,
+            syllabus="Inativa",
+            is_active=False,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Metrologia de Bancada",
+            order_index=1,
+            practical_hours=30,
+            description="Leitura com paquímetro e relógio comparador",
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        inactive_subj_module = LearningModule(
+            subject_id=inactive_subject.id,
+            title="Módulo de Disciplina Inativa",
+            order_index=1,
+            practical_hours=20,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        session.add(inactive_subj_module)
+        comp = CompetencyRepository(session).create(
+            code="COMP-PAQ-024",
+            title="Medição com Paquímetro Universal 0,02mm",
+            category=CompetencyCategory.TECHNICAL,
+            description="Medição externa, interna e profundidade",
+        )
+        session.add(
+            TeacherAssignment(
+                teacher_id=assigned_teacher.id,
+                class_id=active_class.id,
+                subject_id=subject.id,
+                is_main_teacher=True,
+            )
+        )
+        session.commit()
+        inactive_mod_id = inactive_subj_module.id
+
+    base_payload = {
+        "module_id": str(module.id),
+        "class_id": str(active_class.id),
+        "title": "Controle Dimensional de Flange com Paquímetro",
+        "due_date": "2026-04-10T18:00:00Z",
+        "max_score": "10.00",
+        "is_mandatory": True,
+        "criteria": [
+            {
+                "competency_id": str(comp.id),
+                "criterion_name": "Precisão de Leitura ±0,02mm",
+                "weight": "1.00",
+                "min_acceptable_level": 3,
+            }
+        ],
+    }
+
+    # 1. RBAC: 401 sem token, 403 STUDENT e TEACHER não alocado
+    assert (await tasks_client.post("/api/v1/practical-tasks", json=base_payload)).status_code == status.HTTP_401_UNAUTHORIZED
+    for forbidden_tok in (student_token, unassigned_teacher_token):
+        assert (
+            await tasks_client.post(
+                "/api/v1/practical-tasks",
+                json=base_payload,
+                headers={"Authorization": f"Bearer {forbidden_tok}"},
+            )
+        ).status_code == status.HTTP_403_FORBIDDEN
+        assert (
+            await tasks_client.get(
+                f"/api/v1/modules/{module.id}/practical-tasks",
+                headers={"Authorization": f"Bearer {forbidden_tok}"},
+            )
+        ).status_code == status.HTTP_403_FORBIDDEN
+
+    # 2. Erros 404 (módulo/turma inexistentes) e 422 (turma inativa, disciplina inativa, curso divergente)
+    res_no_mod = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "module_id": str(uuid4())},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_no_mod.status_code == status.HTTP_404_NOT_FOUND
+    assert res_no_mod.json()["message"] == PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE
+
+    res_no_cls = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "class_id": str(uuid4())},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_no_cls.status_code == status.HTTP_404_NOT_FOUND
+    assert res_no_cls.json()["message"] == PRACTICAL_TASK_CLASS_NOT_FOUND_MESSAGE
+
+    res_inactive_cls = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "class_id": str(planning_class.id)},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_inactive_cls.status_code == 422
+    assert res_inactive_cls.json()["message"] == PRACTICAL_TASK_INACTIVE_CLASS_MESSAGE
+
+    res_inactive_subj = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "module_id": str(inactive_mod_id)},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_inactive_subj.status_code == 422
+    assert res_inactive_subj.json()["message"] == PRACTICAL_TASK_INACTIVE_SUBJECT_MESSAGE
+
+    res_mismatch_course = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "class_id": str(other_course_class.id)},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_mismatch_course.status_code == 422
+    assert (
+        res_mismatch_course.json()["message"]
+        == PRACTICAL_TASK_MODULE_COURSE_MISMATCH_MESSAGE
+    )
+
+    # 3. Cria 2 tarefas no módulo e valida listagem ordenada por due_date e filtro search
+    res_t1 = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "title": "Tarefa 02 - Relógio Comparador", "due_date": "2026-04-20T18:00:00Z"},
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert res_t1.status_code == status.HTTP_201_CREATED
+
+    res_t2 = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={**base_payload, "title": "Tarefa 01 - Paquímetro Universal", "due_date": "2026-04-10T18:00:00Z", "is_mandatory": False},
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert res_t2.status_code == status.HTTP_201_CREATED
+
+    list_res = await tasks_client.get(
+        f"/api/v1/modules/{module.id}/practical-tasks",
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert list_res.status_code == status.HTTP_200_OK
+    list_body = list_res.json()
+    assert list_body["total"] == 2
+    assert list_body["data"][0]["title"] == "Tarefa 01 - Paquímetro Universal"
+    assert list_body["data"][1]["title"] == "Tarefa 02 - Relógio Comparador"
+
+    # Filtro por search e is_mandatory
+    search_res = await tasks_client.get(
+        f"/api/v1/modules/{module.id}/practical-tasks?search=Comparador&is_mandatory=true",
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert search_res.status_code == status.HTTP_200_OK
+    assert search_res.json()["total"] == 1
+    assert search_res.json()["data"][0]["title"] == "Tarefa 02 - Relógio Comparador"
