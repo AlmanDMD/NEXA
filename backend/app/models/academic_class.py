@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from app.models.class_lesson import ClassLesson
     from app.models.course import Course
     from app.models.enrollment import Enrollment
+    from app.models.practical_task import PracticalTask
     from app.models.teacher_assignment import TeacherAssignment
 
 
@@ -101,6 +102,11 @@ class AcademicClass(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     lessons: Mapped[list["ClassLesson"]] = relationship(
         "ClassLesson",
+        back_populates="academic_class",
+        passive_deletes=True,
+    )
+    practical_tasks: Mapped[list["PracticalTask"]] = relationship(
+        "PracticalTask",
         back_populates="academic_class",
         passive_deletes=True,
     )
