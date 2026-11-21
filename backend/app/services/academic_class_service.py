@@ -1,6 +1,7 @@
 """Serviço de domínio para gestão de Turmas Acadêmicas e Períodos Letivos (BE-012)."""
 
 from typing import Annotated, Final
+import unicodedata
 from uuid import UUID
 
 from fastapi import Depends
@@ -13,6 +14,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import logger
 from app.models.academic_class import AcademicClass
+from app.models.enrollment import Enrollment
 from app.models.user import User
 from app.repositories.academic_class_repository import (
     AcademicClassRepository,
@@ -25,6 +27,9 @@ from app.schemas.academic_class import (
     AcademicClassPaginatedResponseSchema,
     AcademicClassResponseSchema,
     AcademicClassStatusUpdateSchema,
+    ClassEnrolledStudentItemSchema,
+    ClassStudentsListQueryParams,
+    ClassStudentsResponseSchema,
     CourseSummarySchema,
 )
 from app.schemas.enums import ClassStatus, UserRole
@@ -97,6 +102,36 @@ class AcademicClassService:
             updated_at=academic_class.updated_at,
         )
 
+    @staticmethod
+    def _student_sort_key(item: ClassEnrolledStudentItemSchema) -> tuple[str, str, str]:
+        """Gera chave determinística para ordenação alfabética ignorando acentos e caixa."""
+        normalized_ascii = "".join(
+            ch
+            for ch in unicodedata.normalize("NFKD", item.full_name)
+            if not unicodedata.combining(ch)
+        ).casefold()
+        return (normalized_ascii, item.full_name.casefold(), item.email.casefold())
+
+    @staticmethod
+    def _to_student_item(enrollment: Enrollment) -> ClassEnrolledStudentItemSchema:
+        """Converte uma matrícula ORM (com student e profile carregados) em item da pauta."""
+        student = enrollment.student
+        profile = student.profile
+        raw_full_name = profile.full_name.strip() if profile and profile.full_name else ""
+        full_name = raw_full_name or student.email
+        return ClassEnrolledStudentItemSchema(
+            id=student.id,
+            student_id=student.id,
+            enrollment_id=enrollment.id,
+            full_name=full_name,
+            email=student.email,
+            registration_number=profile.registration_number if profile else None,
+            enrollment_date=enrollment.enrollment_date,
+            status=enrollment.status,
+            attendance_rate=enrollment.attendance_rate,
+            final_grade=enrollment.final_grade,
+        )
+
     def list_classes(
         self,
         params: AcademicClassListQueryParams,
@@ -152,6 +187,43 @@ class AcademicClassService:
         return self._to_response(
             academic_class,
             enrolled_students_count=enrolled_count,
+        )
+
+    def list_class_students(
+        self,
+        class_id: UUID,
+        *,
+        params: ClassStudentsListQueryParams | None = None,
+        current_user: User,
+    ) -> ClassStudentsResponseSchema:
+        """Lista os alunos matriculados na turma em ordem alfabética com metadados da turma."""
+        academic_class = self._repository.get_by_id(class_id)
+        if academic_class is None:
+            raise NotFoundException(message=CLASS_NOT_FOUND_MESSAGE)
+
+        if current_user.role == UserRole.TEACHER and not self._repository.is_teacher_assigned_to_class(
+            teacher_id=current_user.id,
+            class_id=academic_class.id,
+        ):
+            raise ForbiddenException(message=CLASS_TEACHER_FORBIDDEN_MESSAGE)
+
+        enrolled_count = self._repository.count_active_enrollments(academic_class.id)
+        enrollments = self._repository.list_enrolled_students(
+            academic_class.id,
+            status=params.status if params else None,
+            search=params.search if params else None,
+        )
+        student_items = sorted(
+            (self._to_student_item(enrollment) for enrollment in enrollments),
+            key=self._student_sort_key,
+        )
+        return ClassStudentsResponseSchema(
+            academic_class=self._to_response(
+                academic_class,
+                enrolled_students_count=enrolled_count,
+            ),
+            total=len(student_items),
+            data=student_items,
         )
 
     def create_class(self, payload: AcademicClassCreateSchema) -> AcademicClassResponseSchema:

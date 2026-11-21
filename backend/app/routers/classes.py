@@ -12,6 +12,8 @@ from app.schemas.academic_class import (
     AcademicClassPaginatedResponseSchema,
     AcademicClassResponseSchema,
     AcademicClassStatusUpdateSchema,
+    ClassStudentsListParamsDep,
+    ClassStudentsResponseSchema,
 )
 from app.schemas.base import UUIDPathParam
 from app.schemas.enums import UserRole
@@ -72,6 +74,29 @@ async def get_class(
 ) -> AcademicClassResponseSchema:
     """Retorna os detalhes da turma, resumo do curso e ocupação de vagas (matriculados vs max_students)."""
     return class_service.get_class(class_id, current_user=current_user)
+
+
+@router.get(
+    "/{class_id}/students",
+    response_model=ClassStudentsResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar lista de estudantes matriculados na turma ordenada alfabeticamente",
+)
+async def list_class_students(
+    class_id: UUIDPathParam,
+    params: ClassStudentsListParamsDep,
+    class_service: AcademicClassServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> ClassStudentsResponseSchema:
+    """Retorna a pauta de estudantes matriculados na turma (ordem alfabética) e metadados da turma."""
+    return class_service.list_class_students(
+        class_id,
+        params=params,
+        current_user=current_user,
+    )
 
 
 @router.patch(

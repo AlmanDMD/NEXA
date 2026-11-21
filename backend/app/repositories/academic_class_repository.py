@@ -25,7 +25,19 @@ from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
 from app.models.base import _utc_now
 from app.models.course import Course
+from app.models.enrollment import Enrollment
+from app.models.user import User, UserProfile
 from app.schemas.enums import ClassStatus, EnrollmentStatus, Shift
+
+
+def _build_ilike_pattern(search: str) -> str:
+    """Escapa curingas SQL (%, _, \\) e devolve padrão ILIKE para busca textual segura."""
+    escaped = (
+        search.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
 
 
 class AcademicClassRepository:
@@ -112,12 +124,7 @@ class AcademicClassRepository:
 
         if search:
             stmt = stmt.join(AcademicClass.course)
-            escaped = (
-                search.replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
-            )
-            pattern = f"%{escaped}%"
+            pattern = _build_ilike_pattern(search)
             stmt = stmt.where(
                 or_(
                     AcademicClass.code.ilike(pattern, escape="\\"),
@@ -256,6 +263,42 @@ class AcademicClassRepository:
             .limit(1)
         )
         return self._session.scalar(stmt) is not None
+
+    def list_enrolled_students(
+        self,
+        class_id: UUID,
+        *,
+        status: EnrollmentStatus | None = None,
+        search: str | None = None,
+    ) -> list[Enrollment]:
+        """Lista matrículas da turma em consulta única (JOIN com users e user_profiles) ordenada por nome."""
+        stmt = (
+            select(Enrollment)
+            .join(Enrollment.student)
+            .outerjoin(User.profile)
+            .options(joinedload(Enrollment.student).joinedload(User.profile))
+            .where(Enrollment.class_id == class_id)
+        )
+
+        if status is not None:
+            stmt = stmt.where(Enrollment.status == status)
+
+        if search:
+            pattern = _build_ilike_pattern(search)
+            stmt = stmt.where(
+                or_(
+                    UserProfile.full_name.ilike(pattern, escape="\\"),
+                    UserProfile.registration_number.ilike(pattern, escape="\\"),
+                    User.email.ilike(pattern, escape="\\"),
+                )
+            )
+
+        stmt = stmt.order_by(
+            func.lower(func.coalesce(UserProfile.full_name, User.email)).asc(),
+            func.lower(User.email).asc(),
+            Enrollment.id.asc(),
+        )
+        return list(self._session.scalars(stmt).unique().all())
 
 
 def get_academic_class_repository(session: DbSessionDep) -> AcademicClassRepository:
