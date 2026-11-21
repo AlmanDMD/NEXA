@@ -40,6 +40,11 @@ from app.repositories.learning_module_repository import (
     LearningModuleRepositoryDep,
     get_learning_module_repository,
 )
+from app.repositories.practical_task_repository import (
+    PracticalTaskRepository,
+    PracticalTaskRepositoryDep,
+    get_practical_task_repository,
+)
 from app.repositories.subject_repository import (
     SubjectRepository,
     SubjectRepositoryDep,
@@ -68,6 +73,8 @@ __all__ = [
     "EnrollmentRepositoryDep",
     "LearningModuleRepository",
     "LearningModuleRepositoryDep",
+    "PracticalTaskRepository",
+    "PracticalTaskRepositoryDep",
     "SubjectRepository",
     "SubjectRepositoryDep",
     "TeacherAssignmentRepository",
@@ -80,6 +87,7 @@ __all__ = [
     "get_course_repository",
     "get_enrollment_repository",
     "get_learning_module_repository",
+    "get_practical_task_repository",
     "get_subject_repository",
     "get_teacher_assignment_repository",
 ]

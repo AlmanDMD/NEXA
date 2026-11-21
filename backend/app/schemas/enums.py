@@ -64,6 +64,15 @@ class AttendanceStatus(StrEnum):
     JUSTIFIED = "JUSTIFIED"
 
 
+class SubmissionStatus(StrEnum):
+    """Status de entrega e avaliação de tarefa prática — 'submission_status_enum' (DB-025)."""
+
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    EVALUATED = "EVALUATED"
+    LATE = "LATE"
+
+
 __all__ = [
     "AttendanceStatus",
     "ClassStatus",
@@ -71,5 +80,6 @@ __all__ = [
     "EnrollmentStatus",
     "RiskLevel",
     "Shift",
+    "SubmissionStatus",
     "UserRole",
 ]

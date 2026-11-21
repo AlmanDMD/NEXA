@@ -22,6 +22,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from app.models.class_lesson import ClassLesson
     from app.models.module_competency import ModuleCompetency
+    from app.models.practical_task import PracticalTask
     from app.models.subject import Subject
 
 _DECIMAL_QUANTIZER = Decimal("0.01")
@@ -125,6 +126,11 @@ class LearningModule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     lessons: Mapped[list["ClassLesson"]] = relationship(
         "ClassLesson",
+        back_populates="module",
+        passive_deletes=True,
+    )
+    practical_tasks: Mapped[list["PracticalTask"]] = relationship(
+        "PracticalTask",
         back_populates="module",
         passive_deletes=True,
     )
