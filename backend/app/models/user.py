@@ -12,6 +12,7 @@ from app.schemas.enums import UserRole
 if TYPE_CHECKING:
     from app.models.audit_log import AuditLog
     from app.models.auth_session import AuthSession
+    from app.models.class_lesson import ClassLesson
     from app.models.enrollment import Enrollment
     from app.models.teacher_assignment import TeacherAssignment
 
@@ -67,6 +68,11 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     audit_logs: Mapped[list["AuditLog"]] = relationship(
         "AuditLog",
         back_populates="user",
+        passive_deletes=True,
+    )
+    lessons_taught: Mapped[list["ClassLesson"]] = relationship(
+        "ClassLesson",
+        back_populates="teacher",
         passive_deletes=True,
     )
 

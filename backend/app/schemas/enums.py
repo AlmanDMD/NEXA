@@ -55,7 +55,17 @@ class CompetencyCategory(StrEnum):
     PROCEDURAL = "PROCEDURAL"
 
 
+class AttendanceStatus(StrEnum):
+    """Status de registro de presença em aula — 'attendance_status_enum'."""
+
+    PRESENT = "PRESENT"
+    ABSENT = "ABSENT"
+    LATE = "LATE"
+    JUSTIFIED = "JUSTIFIED"
+
+
 __all__ = [
+    "AttendanceStatus",
     "ClassStatus",
     "CompetencyCategory",
     "EnrollmentStatus",
