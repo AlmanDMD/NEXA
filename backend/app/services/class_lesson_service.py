@@ -1,5 +1,6 @@
 """Serviço de domínio para Diário de Classe e Registro de Aulas Ministradas (BE-021)."""
 
+from decimal import Decimal
 from typing import Annotated, Final
 from uuid import UUID
 
@@ -13,12 +14,15 @@ from app.core.exceptions import (
 )
 from app.core.logging import logger
 from app.models.class_lesson import ClassLesson
+from app.models.enrollment import Enrollment
 from app.models.user import User
 from app.repositories.class_lesson_repository import (
     ClassLessonRepository,
     ClassLessonRepositoryDep,
 )
 from app.schemas.class_lesson import (
+    BatchAttendanceRequestSchema,
+    BatchAttendanceResponseSchema,
     ClassLessonCreateSchema,
     ClassLessonListQueryParams,
     ClassLessonPaginatedResponseSchema,
@@ -26,9 +30,25 @@ from app.schemas.class_lesson import (
     LessonModuleSummarySchema,
     LessonSubjectSummarySchema,
     LessonTeacherSummarySchema,
+    UpdatedEnrollmentAttendanceSchema,
 )
-from app.schemas.enums import ClassStatus, UserRole
+from app.schemas.enums import AttendanceStatus, ClassStatus, EnrollmentStatus, RiskLevel, UserRole
 
+LESSON_NOT_FOUND_MESSAGE: Final[str] = "Aula não encontrada no diário de classe."
+ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE: Final[str] = (
+    "Estudante informado na chamada não está matriculado na turma desta aula."
+)
+ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE: Final[str] = (
+    "Não é possível registrar frequência para matrícula inativa ou trancada (DROPPED)."
+)
+ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE: Final[str] = (
+    "A quantidade de horas ausentes (absent_hours) não pode ultrapassar a carga horária da aula."
+)
+ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE: Final[str] = (
+    "Alunos com status PRESENT não podem ter horas de falta (absent_hours > 0)."
+)
+ATTENDANCE_CRITICAL_THRESHOLD: Final[Decimal] = Decimal("78.00")
+ATTENDANCE_FAIL_THRESHOLD: Final[Decimal] = Decimal("75.00")
 LESSON_CLASS_NOT_FOUND_MESSAGE: Final[str] = "Turma acadêmica não encontrada."
 LESSON_SUBJECT_NOT_FOUND_MESSAGE: Final[str] = "Disciplina técnica não encontrada."
 LESSON_MODULE_NOT_FOUND_MESSAGE: Final[str] = "Módulo de aprendizagem prática não encontrado."
@@ -202,6 +222,141 @@ class ClassLessonService:
             limit=params.limit,
         )
 
+    def record_batch_attendance(
+        self,
+        lesson_id: UUID,
+        payload: BatchAttendanceRequestSchema,
+        *,
+        current_user: User,
+    ) -> BatchAttendanceResponseSchema:
+        """Executa chamada rápida em lote e recalcula attendance_rate e risco (<78%) no servidor."""
+        lesson = self._repository.get_by_id(lesson_id)
+        if lesson is None:
+            raise NotFoundException(message=LESSON_NOT_FOUND_MESSAGE)
+
+        if (
+            current_user.role == UserRole.TEACHER
+            and not self._repository.is_teacher_assigned_to_class_and_subject(
+                teacher_id=current_user.id,
+                class_id=lesson.class_id,
+                subject_id=lesson.subject_id,
+            )
+        ):
+            raise ForbiddenException(message=LESSON_TEACHER_FORBIDDEN_MESSAGE)
+
+        enrollments_by_student = self._repository.get_enrollments_by_class(lesson.class_id)
+        normalized_items: list[tuple[Enrollment, AttendanceStatus, int, str | None]] = []
+
+        for item in payload.records:
+            enrollment = enrollments_by_student.get(item.student_id)
+            if enrollment is None:
+                raise BadRequestException(message=ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE)
+
+            if enrollment.status != EnrollmentStatus.ACTIVE:
+                raise BadRequestException(message=ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE)
+
+            if item.absent_hours is not None and item.absent_hours > lesson.workload_hours:
+                raise BadRequestException(
+                    message=ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE
+                )
+
+            if item.status == AttendanceStatus.PRESENT:
+                if item.absent_hours is not None and item.absent_hours > 0:
+                    raise BadRequestException(
+                        message=ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE
+                    )
+                resolved_absent_hours = 0
+            elif item.status == AttendanceStatus.ABSENT:
+                resolved_absent_hours = (
+                    item.absent_hours
+                    if (item.absent_hours is not None and item.absent_hours > 0)
+                    else lesson.workload_hours
+                )
+            elif item.status == AttendanceStatus.LATE:
+                resolved_absent_hours = (
+                    item.absent_hours
+                    if (item.absent_hours is not None and item.absent_hours > 0)
+                    else min(lesson.workload_hours, 1)
+                )
+            else:
+                resolved_absent_hours = item.absent_hours if item.absent_hours is not None else 0
+
+            normalized_items.append(
+                (enrollment, item.status, resolved_absent_hours, item.justification_note)
+            )
+
+        rates_by_student = self._repository.upsert_batch_attendance(
+            lesson=lesson,
+            normalized_items=normalized_items,
+        )
+
+        updated_enrollments: list[UpdatedEnrollmentAttendanceSchema] = []
+        present_count = 0
+        absent_count = 0
+        at_risk_students_count = 0
+
+        for enrollment, rec_status, absent_hours, _ in normalized_items:
+            rate = rates_by_student[enrollment.student_id]
+            is_critical, risk_level = evaluate_attendance_risk_level(rate)
+            if rec_status == AttendanceStatus.ABSENT:
+                absent_count += 1
+            else:
+                present_count += 1
+
+            if is_critical:
+                at_risk_students_count += 1
+                logger.bind(
+                    lesson_id=str(lesson.id),
+                    class_id=str(lesson.class_id),
+                    enrollment_id=str(enrollment.id),
+                    student_id=str(enrollment.student_id),
+                    attendance_rate=str(rate),
+                    risk_level=risk_level.value,
+                ).warning(
+                    "Motor de risco acionado após chamada: frequência abaixo do limiar preventivo de 78%."
+                )
+
+            updated_enrollments.append(
+                UpdatedEnrollmentAttendanceSchema(
+                    enrollment_id=enrollment.id,
+                    student_id=enrollment.student_id,
+                    status=rec_status,
+                    absent_hours=absent_hours,
+                    attendance_rate=rate,
+                    is_attendance_critical=is_critical,
+                    risk_level=risk_level,
+                )
+            )
+
+        logger.bind(
+            lesson_id=str(lesson.id),
+            class_id=str(lesson.class_id),
+            actor_id=str(current_user.id),
+            total_processed=len(updated_enrollments),
+            present_count=present_count,
+            absent_count=absent_count,
+            at_risk_students_count=at_risk_students_count,
+        ).info("Chamada em lote registrada e frequências recalculadas no servidor.")
+
+        return BatchAttendanceResponseSchema(
+            lesson_id=lesson.id,
+            class_id=lesson.class_id,
+            total_processed=len(updated_enrollments),
+            present_count=present_count,
+            absent_count=absent_count,
+            at_risk_students_count=at_risk_students_count,
+            updated_enrollments=updated_enrollments,
+        )
+
+
+def evaluate_attendance_risk_level(attendance_rate: Decimal) -> tuple[bool, RiskLevel]:
+    """Avalia risco de evasão por frequência segundo limiares preventivos (<78% HIGH, <75% CRITICAL)."""
+    if attendance_rate < ATTENDANCE_FAIL_THRESHOLD:
+        return True, RiskLevel.CRITICAL
+    if attendance_rate < ATTENDANCE_CRITICAL_THRESHOLD:
+        return True, RiskLevel.HIGH
+    return False, RiskLevel.LOW
+
 
 def get_class_lesson_service(
     repository: ClassLessonRepositoryDep,
@@ -216,6 +371,12 @@ ClassLessonServiceDep = Annotated[
 ]
 
 __all__ = [
+    "ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE",
+    "ATTENDANCE_CRITICAL_THRESHOLD",
+    "ATTENDANCE_FAIL_THRESHOLD",
+    "ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE",
+    "ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE",
+    "ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE",
     "ClassLessonService",
     "ClassLessonServiceDep",
     "LESSON_CLASS_NOT_FOUND_MESSAGE",
@@ -224,9 +385,11 @@ __all__ = [
     "LESSON_INVALID_TEACHER_ROLE_MESSAGE",
     "LESSON_MODULE_NOT_FOUND_MESSAGE",
     "LESSON_MODULE_SUBJECT_MISMATCH_MESSAGE",
+    "LESSON_NOT_FOUND_MESSAGE",
     "LESSON_SUBJECT_COURSE_MISMATCH_MESSAGE",
     "LESSON_SUBJECT_NOT_FOUND_MESSAGE",
     "LESSON_TEACHER_FORBIDDEN_MESSAGE",
     "LESSON_TEACHER_NOT_FOUND_MESSAGE",
+    "evaluate_attendance_risk_level",
     "get_class_lesson_service",
 ]

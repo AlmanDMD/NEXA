@@ -29,6 +29,12 @@ from app.services.auth_service import (
     get_auth_service,
 )
 from app.services.class_lesson_service import (
+    ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE,
+    ATTENDANCE_CRITICAL_THRESHOLD,
+    ATTENDANCE_FAIL_THRESHOLD,
+    ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE,
+    ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE,
+    ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE,
     ClassLessonService,
     ClassLessonServiceDep,
     LESSON_CLASS_NOT_FOUND_MESSAGE,
@@ -37,10 +43,12 @@ from app.services.class_lesson_service import (
     LESSON_INVALID_TEACHER_ROLE_MESSAGE,
     LESSON_MODULE_NOT_FOUND_MESSAGE,
     LESSON_MODULE_SUBJECT_MISMATCH_MESSAGE,
+    LESSON_NOT_FOUND_MESSAGE,
     LESSON_SUBJECT_COURSE_MISMATCH_MESSAGE,
     LESSON_SUBJECT_NOT_FOUND_MESSAGE,
     LESSON_TEACHER_FORBIDDEN_MESSAGE,
     LESSON_TEACHER_NOT_FOUND_MESSAGE,
+    evaluate_attendance_risk_level,
     get_class_lesson_service,
 )
 from app.services.competency_service import (
@@ -114,6 +122,12 @@ from app.services.teacher_assignment_service import (
 )
 
 __all__ = [
+    "ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE",
+    "ATTENDANCE_CRITICAL_THRESHOLD",
+    "ATTENDANCE_FAIL_THRESHOLD",
+    "ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE",
+    "ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE",
+    "ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE",
     "AcademicClassService",
     "AcademicClassServiceDep",
     "AuditService",
@@ -163,6 +177,7 @@ __all__ = [
     "LESSON_INVALID_TEACHER_ROLE_MESSAGE",
     "LESSON_MODULE_NOT_FOUND_MESSAGE",
     "LESSON_MODULE_SUBJECT_MISMATCH_MESSAGE",
+    "LESSON_NOT_FOUND_MESSAGE",
     "LESSON_SUBJECT_COURSE_MISMATCH_MESSAGE",
     "LESSON_SUBJECT_NOT_FOUND_MESSAGE",
     "LESSON_TEACHER_FORBIDDEN_MESSAGE",
@@ -193,6 +208,7 @@ __all__ = [
     "TEACHER_ASSIGNMENT_SUBJECT_NOT_FOUND_MESSAGE",
     "TeacherAssignmentService",
     "TeacherAssignmentServiceDep",
+    "evaluate_attendance_risk_level",
     "get_academic_class_service",
     "get_audit_service",
     "get_auth_service",

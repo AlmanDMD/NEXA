@@ -1,6 +1,7 @@
 """Schemas Pydantic v2 para Diário de Classe e Registro de Aulas Ministradas (BE-021)."""
 
 from datetime import date, datetime
+from decimal import Decimal
 import re
 from typing import Annotated, Any, Self
 from uuid import UUID
@@ -11,9 +12,11 @@ from pydantic_core import PydanticCustomError
 
 from app.schemas.academic_class import ISODate, validate_iso_date_pt
 from app.schemas.base import BaseResponseSchema, StrictRequestSchema, UUIDResponseMixin
+from app.schemas.enums import AttendanceStatus, RiskLevel
 from app.schemas.validators import sanitize_optional_text, sanitize_text
 
 _INT_PATTERN: re.Pattern[str] = re.compile(r"^[+-]?\d+$")
+_DECIMAL_QUANTIZER = Decimal("0.01")
 
 
 def validate_lesson_workload_hours_pt(value: Any) -> int:
@@ -271,7 +274,165 @@ class ClassLessonPaginatedResponseSchema(BaseResponseSchema):
 
 type ClassLessonListParamsDep = Annotated[ClassLessonListQueryParams, Query()]
 
+
+def validate_absent_hours_pt(value: Any) -> int:
+    """Garante que as horas ausentes em chamada sejam um inteiro entre 0 e 8."""
+    if isinstance(value, bool):
+        raise PydanticCustomError(
+            "attendance_absent_hours_invalid",
+            "A quantidade de horas ausentes (absent_hours) deve ser um número inteiro entre 0 e 8.",
+        )
+
+    if isinstance(value, int):
+        if 0 <= value <= 8:
+            return value
+        raise PydanticCustomError(
+            "attendance_absent_hours_invalid",
+            "A quantidade de horas ausentes (absent_hours) deve ser um número inteiro entre 0 e 8.",
+        )
+
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if _INT_PATTERN.fullmatch(cleaned):
+            parsed = int(cleaned)
+            if 0 <= parsed <= 8:
+                return parsed
+
+    raise PydanticCustomError(
+        "attendance_absent_hours_invalid",
+        "A quantidade de horas ausentes (absent_hours) deve ser um número inteiro entre 0 e 8.",
+    )
+
+
+def validate_justification_note_pt(value: Any) -> str | None:
+    """Sanitiza a justificativa opcional de ausência/atraso limitando a 500 caracteres."""
+    cleaned = sanitize_optional_text(value, collapse_spaces=True)
+    if cleaned is None:
+        return None
+    if len(cleaned) > 500:
+        raise PydanticCustomError(
+            "justification_note_too_long",
+            "A justificativa da frequência (justification_note) deve ter no máximo 500 caracteres.",
+        )
+    return cleaned
+
+
+type AbsentHoursInt = Annotated[
+    int,
+    BeforeValidator(validate_absent_hours_pt),
+    Field(
+        ge=0,
+        le=8,
+        description="Quantidade de horas ausentes registradas para a aula (0 a 8h)",
+        examples=[0],
+    ),
+]
+
+type OptionalJustificationNoteStr = Annotated[
+    str | None,
+    BeforeValidator(validate_justification_note_pt),
+    Field(
+        description="Observação ou justificativa opcional para falta ou atraso (até 500 caracteres)",
+        examples=["Atestado médico entregue à secretaria."],
+    ),
+]
+
+
+class AttendanceRecordItemInputSchema(StrictRequestSchema):
+    """Item individual da chamada em lote de uma aula (POST /api/v1/lessons/{id}/attendance)."""
+
+    student_id: UUID = Field(
+        description="Identificador UUID do estudante matriculado na turma da aula",
+    )
+    status: AttendanceStatus = Field(
+        description="Situação de frequência na aula (PRESENT, ABSENT, LATE, JUSTIFIED)",
+        examples=[AttendanceStatus.PRESENT],
+    )
+    absent_hours: AbsentHoursInt | None = Field(
+        default=None,
+        description="Horas ausentes na aula (0 a carga horária da aula; padrão derivado do status quando omitido)",
+        examples=[0],
+    )
+    justification_note: OptionalJustificationNoteStr = None
+
+
+class BatchAttendanceRequestSchema(StrictRequestSchema):
+    """Payload da chamada rápida em lote contendo todos os registros da aula."""
+
+    records: list[AttendanceRecordItemInputSchema] = Field(
+        min_length=1,
+        max_length=200,
+        description="Lista de registros individuais de presença/falta da turma",
+    )
+
+    @model_validator(mode="after")
+    def validate_unique_students(self) -> Self:
+        """Impede envio duplicado do mesmo student_id dentro do mesmo lote de chamada."""
+        seen: set[UUID] = set()
+        for item in self.records:
+            if item.student_id in seen:
+                raise PydanticCustomError(
+                    "duplicate_attendance_student",
+                    "A lista de chamada contém student_id duplicado no mesmo lote.",
+                )
+            seen.add(item.student_id)
+        return self
+
+
+class UpdatedEnrollmentAttendanceSchema(BaseResponseSchema):
+    """Resumo atualizado da matrícula após recálculo de frequência no servidor."""
+
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula atualizada")
+    student_id: UUID = Field(description="Identificador UUID do estudante")
+    status: AttendanceStatus = Field(description="Status gravado para a aula")
+    absent_hours: int = Field(ge=0, le=8, description="Horas ausentes computadas na aula")
+    attendance_rate: Decimal = Field(
+        description="Taxa de frequência recalculada no servidor (0.00 a 100.00%)",
+        examples=["95.00"],
+    )
+    is_attendance_critical: bool = Field(
+        description="Indica se a frequência atualizada caiu abaixo de 78% (< 78.00%)",
+    )
+    risk_level: RiskLevel = Field(
+        description="Nível de risco avaliado pelo motor de regras de frequência",
+    )
+
+    @field_validator("attendance_rate", mode="after")
+    @classmethod
+    def quantize_attendance_rate(cls, value: Decimal) -> Decimal:
+        """Padroniza attendance_rate com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class BatchAttendanceResponseSchema(BaseResponseSchema):
+    """Resumo consolidado do processamento em lote da chamada da aula."""
+
+    lesson_id: UUID = Field(description="Identificador UUID da aula processada")
+    class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
+    total_processed: int = Field(ge=0, description="Total de registros processados no lote")
+    present_count: int = Field(
+        ge=0,
+        description="Quantidade de alunos com presença contabilizada (PRESENT, LATE, JUSTIFIED)",
+    )
+    absent_count: int = Field(
+        ge=0,
+        description="Quantidade de alunos registrados com falta integral (ABSENT)",
+    )
+    at_risk_students_count: int = Field(
+        ge=0,
+        description="Quantidade de alunos com frequência abaixo de 78% após o recálculo",
+    )
+    updated_enrollments: list[UpdatedEnrollmentAttendanceSchema] = Field(
+        default_factory=list,
+        description="Lista das matrículas recalculadas no servidor",
+    )
+
+
 __all__ = [
+    "AbsentHoursInt",
+    "AttendanceRecordItemInputSchema",
+    "BatchAttendanceRequestSchema",
+    "BatchAttendanceResponseSchema",
     "ClassLessonCreateSchema",
     "ClassLessonListParamsDep",
     "ClassLessonListQueryParams",
@@ -282,7 +443,11 @@ __all__ = [
     "LessonTeacherSummarySchema",
     "LessonTopicSummaryStr",
     "LessonWorkloadHoursInt",
+    "OptionalJustificationNoteStr",
     "OptionalLabEnvironmentStr",
+    "UpdatedEnrollmentAttendanceSchema",
+    "validate_absent_hours_pt",
+    "validate_justification_note_pt",
     "validate_lab_environment_pt",
     "validate_lesson_workload_hours_pt",
     "validate_topic_summary_pt",
