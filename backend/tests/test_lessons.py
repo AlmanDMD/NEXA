@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator, Generator
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -45,14 +46,26 @@ from app.schemas.class_lesson import (
     validate_lesson_workload_hours_pt,
     validate_topic_summary_pt,
 )
-from app.schemas.enums import AttendanceStatus, ClassStatus, EnrollmentStatus, Shift, UserRole
+from app.schemas.enums import (
+    AttendanceStatus,
+    ClassStatus,
+    EnrollmentStatus,
+    RiskLevel,
+    Shift,
+    UserRole,
+)
 from app.schemas.user import UserProfileCreateSchema
 from app.services.class_lesson_service import (
+    ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE,
+    ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE,
+    ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE,
+    ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE,
     LESSON_CLASS_NOT_FOUND_MESSAGE,
     LESSON_CLASS_TEACHER_FORBIDDEN_MESSAGE,
     LESSON_INACTIVE_CLASS_MESSAGE,
     LESSON_MODULE_NOT_FOUND_MESSAGE,
     LESSON_MODULE_SUBJECT_MISMATCH_MESSAGE,
+    LESSON_NOT_FOUND_MESSAGE,
     LESSON_SUBJECT_COURSE_MISMATCH_MESSAGE,
     LESSON_SUBJECT_NOT_FOUND_MESSAGE,
     LESSON_TEACHER_FORBIDDEN_MESSAGE,
@@ -826,3 +839,328 @@ async def test_list_class_lessons_filters_chronological_order_and_domain_errors(
             headers={"Authorization": f"Bearer {teacher_token}"},
         )
     ).status_code == status.HTTP_400_BAD_REQUEST
+
+
+async def test_batch_attendance_upsert_recalculates_attendance_rate_and_triggers_risk_evaluation(
+    lessons_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Critérios BE-022: Upsert transacional, recálculo server-side, JUSTIFIED e limiar de risco <78%."""
+    course = _create_course_in_db(db_session_factory)
+    academic_class = _create_class_in_db(db_session_factory, course_id=course.id)
+    subject = _create_subject_in_db(db_session_factory, course_id=course.id)
+
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="att_tch"
+    )
+    _assign_teacher(
+        db_session_factory,
+        teacher_id=teacher.id,
+        class_id=academic_class.id,
+        subject_id=subject.id,
+    )
+
+    stu_1, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="att_s1"
+    )
+    stu_2, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="att_s2"
+    )
+    stu_3, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="att_s3"
+    )
+    enr_1 = _enroll_student(db_session_factory, student_id=stu_1.id, class_id=academic_class.id)
+    enr_2 = _enroll_student(db_session_factory, student_id=stu_2.id, class_id=academic_class.id)
+    enr_3 = _enroll_student(db_session_factory, student_id=stu_3.id, class_id=academic_class.id)
+
+    headers = {"Authorization": f"Bearer {teacher_token}"}
+    res_l1 = await lessons_client.post(
+        "/api/v1/lessons",
+        json={
+            "class_id": str(academic_class.id),
+            "subject_id": str(subject.id),
+            "lesson_date": "2026-03-10",
+            "workload_hours": 4,
+            "topic_summary": "Aula 1: Torneamento paralelo",
+        },
+        headers=headers,
+    )
+    res_l2 = await lessons_client.post(
+        "/api/v1/lessons",
+        json={
+            "class_id": str(academic_class.id),
+            "subject_id": str(subject.id),
+            "lesson_date": "2026-03-12",
+            "workload_hours": 4,
+            "topic_summary": "Aula 2: Controle dimensional",
+        },
+        headers=headers,
+    )
+    assert res_l1.status_code == status.HTTP_201_CREATED
+    assert res_l2.status_code == status.HTTP_201_CREATED
+    lesson1_id = res_l1.json()["id"]
+    lesson2_id = res_l2.json()["id"]
+
+    # Aula 1: todos presentes (100.00%)
+    res_call_1 = await lessons_client.post(
+        f"/api/v1/lessons/{lesson1_id}/attendance",
+        json={
+            "records": [
+                {"student_id": str(stu_1.id), "status": "PRESENT"},
+                {"student_id": str(stu_2.id), "status": "PRESENT", "absent_hours": 0},
+                {"student_id": str(stu_3.id), "status": "PRESENT"},
+            ]
+        },
+        headers=headers,
+    )
+    assert res_call_1.status_code == status.HTTP_200_OK
+    body_1 = res_call_1.json()
+    assert body_1["total_processed"] == 3
+    assert body_1["present_count"] == 3
+    assert body_1["absent_count"] == 0
+    assert body_1["at_risk_students_count"] == 0
+
+    # Aula 2: stu_1 JUSTIFIED (100%), stu_2 LATE 2h (6/8 = 75.00% HIGH), stu_3 ABSENT 4h (4/8 = 50.00% CRITICAL)
+    res_call_2 = await lessons_client.post(
+        f"/api/v1/lessons/{lesson2_id}/attendance",
+        json={
+            "records": [
+                {
+                    "student_id": str(stu_1.id),
+                    "status": "JUSTIFIED",
+                    "absent_hours": 4,
+                    "justification_note": "  Atestado   médico SENAI  ",
+                },
+                {
+                    "student_id": str(stu_2.id),
+                    "status": "LATE",
+                    "absent_hours": 2,
+                    "justification_note": "Chegou após intervalo",
+                },
+                {
+                    "student_id": str(stu_3.id),
+                    "status": "ABSENT",
+                },
+            ]
+        },
+        headers=headers,
+    )
+    assert res_call_2.status_code == status.HTTP_200_OK
+    body_2 = res_call_2.json()
+    assert body_2["total_processed"] == 3
+    assert body_2["present_count"] == 2
+    assert body_2["absent_count"] == 1
+    assert body_2["at_risk_students_count"] == 2
+
+    by_stu = {item["student_id"]: item for item in body_2["updated_enrollments"]}
+    assert by_stu[str(stu_1.id)]["attendance_rate"] == "100.00"
+    assert by_stu[str(stu_1.id)]["is_attendance_critical"] is False
+    assert by_stu[str(stu_1.id)]["risk_level"] == RiskLevel.LOW.value
+
+    assert by_stu[str(stu_2.id)]["attendance_rate"] == "75.00"
+    assert by_stu[str(stu_2.id)]["is_attendance_critical"] is True
+    assert by_stu[str(stu_2.id)]["risk_level"] == RiskLevel.HIGH.value
+
+    assert by_stu[str(stu_3.id)]["absent_hours"] == 4
+    assert by_stu[str(stu_3.id)]["attendance_rate"] == "50.00"
+    assert by_stu[str(stu_3.id)]["is_attendance_critical"] is True
+    assert by_stu[str(stu_3.id)]["risk_level"] == RiskLevel.CRITICAL.value
+
+    # Confirma persistência real em enrollments e retificação idempotente via upsert
+    with db_session_factory() as session:
+        assert session.get(Enrollment, enr_1.id).attendance_rate == Decimal("100.00")  # type: ignore[union-attr]
+        assert session.get(Enrollment, enr_2.id).attendance_rate == Decimal("75.00")  # type: ignore[union-attr]
+        assert session.get(Enrollment, enr_3.id).attendance_rate == Decimal("50.00")  # type: ignore[union-attr]
+
+    # Retificação de chamada: corrige stu_3 de ABSENT para PRESENT sem duplicar registros
+    res_rectify = await lessons_client.post(
+        f"/api/v1/lessons/{lesson2_id}/attendance",
+        json={
+            "records": [
+                {"student_id": str(stu_3.id), "status": "PRESENT"},
+            ]
+        },
+        headers=headers,
+    )
+    assert res_rectify.status_code == status.HTTP_200_OK
+    assert res_rectify.json()["total_processed"] == 1
+    assert res_rectify.json()["at_risk_students_count"] == 0
+    assert res_rectify.json()["updated_enrollments"][0]["attendance_rate"] == "100.00"
+    assert res_rectify.json()["updated_enrollments"][0]["risk_level"] == RiskLevel.LOW.value
+
+    with db_session_factory() as session:
+        rec_count = int(
+            session.scalar(
+                select(sa.func.count())
+                .select_from(AttendanceRecord)
+                .where(AttendanceRecord.lesson_id == UUID(lesson2_id))
+            )
+            or 0
+        )
+        assert rec_count == 3
+        assert session.get(Enrollment, enr_3.id).attendance_rate == Decimal("100.00")  # type: ignore[union-attr]
+
+
+async def test_batch_attendance_rejects_unenrolled_student_invalid_payloads_and_rbac(
+    lessons_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Critérios BE-022: HTTP 400 para não matriculado/extra/inválido, 401/403 RBAC e atomicidade."""
+    course = _create_course_in_db(db_session_factory)
+    academic_class = _create_class_in_db(db_session_factory, course_id=course.id)
+    subject = _create_subject_in_db(db_session_factory, course_id=course.id)
+
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="b_tch"
+    )
+    _, other_teacher_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="b_otch"
+    )
+    _, admin_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.ADMIN, suffix="b_adm"
+    )
+    stu_active, student_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="b_s1"
+    )
+    stu_dropped, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="b_s2_drp"
+    )
+    stu_outsider, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="b_s_out"
+    )
+    enr_active = _enroll_student(
+        db_session_factory,
+        student_id=stu_active.id,
+        class_id=academic_class.id,
+        status_value=EnrollmentStatus.ACTIVE,
+    )
+    _enroll_student(
+        db_session_factory,
+        student_id=stu_dropped.id,
+        class_id=academic_class.id,
+        status_value=EnrollmentStatus.DROPPED,
+    )
+    _assign_teacher(
+        db_session_factory,
+        teacher_id=teacher.id,
+        class_id=academic_class.id,
+        subject_id=subject.id,
+    )
+
+    res_lesson = await lessons_client.post(
+        "/api/v1/lessons",
+        json={
+            "class_id": str(academic_class.id),
+            "subject_id": str(subject.id),
+            "lesson_date": "2026-03-15",
+            "workload_hours": 4,
+            "topic_summary": "Prática de metrologia",
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_lesson.status_code == status.HTTP_201_CREATED
+    lesson_id = res_lesson.json()["id"]
+
+    # 1. Estudante não matriculado misturado com aluno válido -> HTTP 400 atômico (sem persistir nada)
+    res_outsider = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={
+            "records": [
+                {"student_id": str(stu_active.id), "status": "ABSENT"},
+                {"student_id": str(stu_outsider.id), "status": "PRESENT"},
+            ]
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_outsider.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_outsider.json()["message"] == ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE
+
+    with db_session_factory() as session:
+        # Matrícula ativa permanece intacta (não recalculada nem marcada como falta)
+        assert session.get(Enrollment, enr_active.id).attendance_rate is None  # type: ignore[union-attr]
+
+    # 2. Matrícula DROPPED rejeitada com HTTP 400
+    res_dropped = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={"records": [{"student_id": str(stu_dropped.id), "status": "PRESENT"}]},
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_dropped.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_dropped.json()["message"] == ATTENDANCE_INACTIVE_ENROLLMENT_MESSAGE
+
+    # 3. Payload tentando injetar attendance_rate manualmente -> HTTP 400 (extra="forbid")
+    res_client_rate = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={
+            "records": [{"student_id": str(stu_active.id), "status": "ABSENT"}],
+            "attendance_rate": "100.00",
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_client_rate.status_code == status.HTTP_400_BAD_REQUEST
+
+    # 4. student_id duplicado no mesmo lote -> HTTP 400
+    res_dup_stu = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={
+            "records": [
+                {"student_id": str(stu_active.id), "status": "PRESENT"},
+                {"student_id": str(stu_active.id), "status": "ABSENT"},
+            ]
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_dup_stu.status_code == status.HTTP_400_BAD_REQUEST
+
+    # 5. absent_hours excedendo carga horária da aula (4h) ou PRESENT com absent_hours > 0 -> HTTP 400
+    res_exceed = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={"records": [{"student_id": str(stu_active.id), "status": "ABSENT", "absent_hours": 6}]},
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_exceed.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_exceed.json()["message"] == ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE
+
+    res_present_bad = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={"records": [{"student_id": str(stu_active.id), "status": "PRESENT", "absent_hours": 1}]},
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_present_bad.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_present_bad.json()["message"] == ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE
+
+    # 6. RBAC e 404: 401 sem token, 403 STUDENT e docente não alocado, 404 aula inexistente, 200 ADMIN
+    assert (
+        await lessons_client.post(
+            f"/api/v1/lessons/{lesson_id}/attendance",
+            json={"records": [{"student_id": str(stu_active.id), "status": "PRESENT"}]},
+        )
+    ).status_code == status.HTTP_401_UNAUTHORIZED
+
+    for forbidden_tok in (student_token, other_teacher_token):
+        assert (
+            await lessons_client.post(
+                f"/api/v1/lessons/{lesson_id}/attendance",
+                json={"records": [{"student_id": str(stu_active.id), "status": "PRESENT"}]},
+                headers={"Authorization": f"Bearer {forbidden_tok}"},
+            )
+        ).status_code == status.HTTP_403_FORBIDDEN
+
+    res_404 = await lessons_client.post(
+        f"/api/v1/lessons/{uuid4()}/attendance",
+        json={"records": [{"student_id": str(stu_active.id), "status": "PRESENT"}]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_404.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404.json()["message"] == LESSON_NOT_FOUND_MESSAGE
+
+    res_admin_ok = await lessons_client.post(
+        f"/api/v1/lessons/{lesson_id}/attendance",
+        json={"records": [{"student_id": str(stu_active.id), "status": "PRESENT"}]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_admin_ok.status_code == status.HTTP_200_OK
+    assert res_admin_ok.json()["total_processed"] == 1
+
