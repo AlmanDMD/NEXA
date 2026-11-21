@@ -78,6 +78,18 @@ from app.services.subject_service import (
     SubjectServiceDep,
     get_subject_service,
 )
+from app.services.teacher_assignment_service import (
+    TEACHER_ASSIGNMENT_CLASS_NOT_FOUND_MESSAGE,
+    TEACHER_ASSIGNMENT_CONFLICT_MESSAGE,
+    TEACHER_ASSIGNMENT_COURSE_MISMATCH_MESSAGE,
+    TEACHER_ASSIGNMENT_INACTIVE_SUBJECT_MESSAGE,
+    TEACHER_ASSIGNMENT_INACTIVE_TEACHER_MESSAGE,
+    TEACHER_ASSIGNMENT_INVALID_TEACHER_MESSAGE,
+    TEACHER_ASSIGNMENT_SUBJECT_NOT_FOUND_MESSAGE,
+    TeacherAssignmentService,
+    TeacherAssignmentServiceDep,
+    get_teacher_assignment_service,
+)
 
 __all__ = [
     "AcademicClassService",
@@ -134,6 +146,15 @@ __all__ = [
     "SUBJECT_NOT_FOUND_MESSAGE",
     "SubjectService",
     "SubjectServiceDep",
+    "TEACHER_ASSIGNMENT_CLASS_NOT_FOUND_MESSAGE",
+    "TEACHER_ASSIGNMENT_CONFLICT_MESSAGE",
+    "TEACHER_ASSIGNMENT_COURSE_MISMATCH_MESSAGE",
+    "TEACHER_ASSIGNMENT_INACTIVE_SUBJECT_MESSAGE",
+    "TEACHER_ASSIGNMENT_INACTIVE_TEACHER_MESSAGE",
+    "TEACHER_ASSIGNMENT_INVALID_TEACHER_MESSAGE",
+    "TEACHER_ASSIGNMENT_SUBJECT_NOT_FOUND_MESSAGE",
+    "TeacherAssignmentService",
+    "TeacherAssignmentServiceDep",
     "get_academic_class_service",
     "get_auth_service",
     "get_competency_service",
@@ -142,4 +163,5 @@ __all__ = [
     "get_health_service",
     "get_learning_module_service",
     "get_subject_service",
+    "get_teacher_assignment_service",
 ]

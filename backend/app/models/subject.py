@@ -21,6 +21,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from app.models.course import Course
     from app.models.learning_module import LearningModule
+    from app.models.teacher_assignment import TeacherAssignment
 
 
 class Subject(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -71,6 +72,11 @@ class Subject(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "LearningModule",
         back_populates="subject",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    teacher_assignments: Mapped[list["TeacherAssignment"]] = relationship(
+        "TeacherAssignment",
+        back_populates="subject",
         passive_deletes=True,
     )
 

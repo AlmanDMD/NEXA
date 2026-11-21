@@ -35,6 +35,11 @@ from app.repositories.subject_repository import (
     SubjectRepositoryDep,
     get_subject_repository,
 )
+from app.repositories.teacher_assignment_repository import (
+    TeacherAssignmentRepository,
+    TeacherAssignmentRepositoryDep,
+    get_teacher_assignment_repository,
+)
 
 __all__ = [
     "AcademicClassRepository",
@@ -51,6 +56,8 @@ __all__ = [
     "LearningModuleRepositoryDep",
     "SubjectRepository",
     "SubjectRepositoryDep",
+    "TeacherAssignmentRepository",
+    "TeacherAssignmentRepositoryDep",
     "get_academic_class_repository",
     "get_auth_repository",
     "get_competency_repository",
@@ -58,4 +65,5 @@ __all__ = [
     "get_enrollment_repository",
     "get_learning_module_repository",
     "get_subject_repository",
+    "get_teacher_assignment_repository",
 ]

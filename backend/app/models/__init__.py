@@ -9,6 +9,7 @@ from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
 from app.models.subject import Subject
+from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User, UserProfile
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "LearningModule",
     "ModuleCompetency",
     "Subject",
+    "TeacherAssignment",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
     "User",

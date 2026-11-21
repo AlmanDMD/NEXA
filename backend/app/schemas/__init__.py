@@ -121,6 +121,13 @@ from app.schemas.subject import (
     validate_subject_name_pt,
     validate_subject_workload_hours_pt,
 )
+from app.schemas.teacher_assignment import (
+    TeacherAssignmentClassSummarySchema,
+    TeacherAssignmentCreateSchema,
+    TeacherAssignmentResponseSchema,
+    TeacherAssignmentSubjectSummarySchema,
+    TeacherAssignmentTeacherSummarySchema,
+)
 from app.schemas.user import (
     UserCreateSchema,
     UserProfileCreateSchema,
@@ -237,6 +244,11 @@ __all__ = [
     "SubjectResponseSchema",
     "SubjectSummarySchema",
     "SubjectUpdateSchema",
+    "TeacherAssignmentClassSummarySchema",
+    "TeacherAssignmentCreateSchema",
+    "TeacherAssignmentResponseSchema",
+    "TeacherAssignmentSubjectSummarySchema",
+    "TeacherAssignmentTeacherSummarySchema",
     "TimestampResponseMixin",
     "TokenResponseSchema",
     "UUIDPathParam",
