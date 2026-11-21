@@ -5,6 +5,7 @@ from app.models.auth_session import AuthSession
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.competency import Competency
 from app.models.course import Course
+from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
 from app.models.subject import Subject
@@ -16,6 +17,7 @@ __all__ = [
     "Base",
     "Competency",
     "Course",
+    "Enrollment",
     "LearningModule",
     "ModuleCompetency",
     "Subject",

@@ -11,6 +11,7 @@ from app.schemas.enums import UserRole
 
 if TYPE_CHECKING:
     from app.models.auth_session import AuthSession
+    from app.models.enrollment import Enrollment
 
 
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -50,6 +51,11 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "AuthSession",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    enrollments: Mapped[list["Enrollment"]] = relationship(
+        "Enrollment",
+        back_populates="student",
+        passive_deletes=True,
     )
 
 

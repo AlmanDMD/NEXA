@@ -69,6 +69,12 @@ from app.schemas.course import (
     CourseUpdateSchema,
     PositiveHoursInt,
 )
+from app.schemas.enrollment import (
+    EnrollmentClassSummarySchema,
+    EnrollmentCreateSchema,
+    EnrollmentResponseSchema,
+    EnrollmentStudentSummarySchema,
+)
 from app.schemas.enums import (
     ClassStatus,
     CompetencyCategory,
@@ -168,7 +174,11 @@ __all__ = [
     "CourseResponseSchema",
     "CourseSummarySchema",
     "CourseUpdateSchema",
+    "EnrollmentClassSummarySchema",
+    "EnrollmentCreateSchema",
+    "EnrollmentResponseSchema",
     "EnrollmentStatus",
+    "EnrollmentStudentSummarySchema",
     "EntityResponseSchema",
     "ErrorDetail",
     "ErrorResponse",

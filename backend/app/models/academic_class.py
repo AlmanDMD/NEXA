@@ -22,6 +22,7 @@ from app.schemas.enums import ClassStatus, Shift
 
 if TYPE_CHECKING:
     from app.models.course import Course
+    from app.models.enrollment import Enrollment
 
 
 class AcademicClass(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -85,6 +86,11 @@ class AcademicClass(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="classes",
         lazy="joined",
         innerjoin=True,
+    )
+    enrollments: Mapped[list["Enrollment"]] = relationship(
+        "Enrollment",
+        back_populates="academic_class",
+        passive_deletes=True,
     )
 
     @validates("code")
