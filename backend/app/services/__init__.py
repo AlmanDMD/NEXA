@@ -12,6 +12,11 @@ from app.services.academic_class_service import (
     CLASS_TEACHER_FORBIDDEN_MESSAGE,
     get_academic_class_service,
 )
+from app.services.audit_service import (
+    AuditService,
+    AuditServiceDep,
+    get_audit_service,
+)
 from app.services.auth_service import (
     AuthService,
     AuthServiceDep,
@@ -49,6 +54,8 @@ from app.services.enrollment_service import (
     ENROLLMENT_INACTIVE_COURSE_MESSAGE,
     ENROLLMENT_INACTIVE_STUDENT_MESSAGE,
     ENROLLMENT_INVALID_STUDENT_ROLE_MESSAGE,
+    ENROLLMENT_NOT_FOUND_MESSAGE,
+    ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE,
     ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE,
     EnrollmentService,
     EnrollmentServiceDep,
@@ -94,6 +101,8 @@ from app.services.teacher_assignment_service import (
 __all__ = [
     "AcademicClassService",
     "AcademicClassServiceDep",
+    "AuditService",
+    "AuditServiceDep",
     "AuthService",
     "AuthServiceDep",
     "CLASS_ACTIVATION_INACTIVE_COURSE_MESSAGE",
@@ -119,6 +128,8 @@ __all__ = [
     "ENROLLMENT_INACTIVE_COURSE_MESSAGE",
     "ENROLLMENT_INACTIVE_STUDENT_MESSAGE",
     "ENROLLMENT_INVALID_STUDENT_ROLE_MESSAGE",
+    "ENROLLMENT_NOT_FOUND_MESSAGE",
+    "ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE",
     "ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE",
     "EnrollmentService",
     "EnrollmentServiceDep",
@@ -156,6 +167,7 @@ __all__ = [
     "TeacherAssignmentService",
     "TeacherAssignmentServiceDep",
     "get_academic_class_service",
+    "get_audit_service",
     "get_auth_service",
     "get_competency_service",
     "get_course_service",
