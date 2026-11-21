@@ -16,6 +16,8 @@ from app.core.exceptions import (
 )
 from app.core.logging import logger
 from app.models.enrollment import Enrollment, _utc_today
+from app.models.user import User
+from app.repositories.audit_repository import AuditRepository
 from app.repositories.enrollment_repository import (
     EnrollmentRepository,
     EnrollmentRepositoryDep,
@@ -24,10 +26,16 @@ from app.schemas.enrollment import (
     EnrollmentClassSummarySchema,
     EnrollmentCreateSchema,
     EnrollmentResponseSchema,
+    EnrollmentStatusUpdateSchema,
     EnrollmentStudentSummarySchema,
 )
 from app.schemas.enums import ClassStatus, EnrollmentStatus, UserRole
+from app.services.audit_service import AuditService, AuditServiceDep
 
+ENROLLMENT_NOT_FOUND_MESSAGE: Final[str] = "Matrícula não encontrada."
+ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE: Final[str] = (
+    "Não é possível reativar matrícula em uma turma que não está ativa."
+)
 ENROLLMENT_CLASS_NOT_FOUND_MESSAGE: Final[str] = "Turma acadêmica não encontrada."
 ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE: Final[str] = "Estudante não encontrado."
 ENROLLMENT_INVALID_STUDENT_ROLE_MESSAGE: Final[str] = (
@@ -68,10 +76,19 @@ def _get_async_class_lock(class_id: UUID) -> asyncio.Lock:
 
 
 class EnrollmentService:
-    """Serviço responsável pelo processamento atômico de matrículas e controle de vagas."""
+    """Serviço responsável pelo processamento atômico de matrículas, controle de vagas e auditoria."""
 
-    def __init__(self, repository: EnrollmentRepository) -> None:
+    def __init__(
+        self,
+        repository: EnrollmentRepository,
+        audit_service: AuditService | None = None,
+    ) -> None:
         self._repository = repository
+        self._audit_service = (
+            audit_service
+            if audit_service is not None
+            else AuditService(repository=AuditRepository(session=repository.session))
+        )
 
     @staticmethod
     def _to_response(enrollment: Enrollment) -> EnrollmentResponseSchema:
@@ -182,12 +199,104 @@ class EnrollmentService:
                 ).info("Estudante matriculado na turma acadêmica com sucesso.")
                 return self._to_response(created)
 
+    async def update_enrollment_status(
+        self,
+        enrollment_id: UUID,
+        payload: EnrollmentStatusUpdateSchema,
+        *,
+        current_user: User,
+        ip_address: str | None = None,
+    ) -> EnrollmentResponseSchema:
+        """Altera o status da matrícula e grava trilha de auditoria JSON em audit_logs."""
+        initial_enrollment = self._repository.get_by_id(enrollment_id)
+        if initial_enrollment is None:
+            raise NotFoundException(message=ENROLLMENT_NOT_FOUND_MESSAGE)
+
+        async with _get_async_class_lock(initial_enrollment.class_id):
+            with _THREAD_LOCK:
+                enrollment = self._repository.get_by_id(enrollment_id)
+                if enrollment is None:
+                    raise NotFoundException(message=ENROLLMENT_NOT_FOUND_MESSAGE)
+
+                academic_class = self._repository.get_class_for_update(enrollment.class_id)
+                if academic_class is None:
+                    raise NotFoundException(message=ENROLLMENT_CLASS_NOT_FOUND_MESSAGE)
+
+                previous_status = enrollment.status
+                is_reactivation = (
+                    previous_status != EnrollmentStatus.ACTIVE
+                    and payload.status == EnrollmentStatus.ACTIVE
+                )
+                if is_reactivation:
+                    if academic_class.status != ClassStatus.ACTIVE:
+                        raise UnprocessableEntityException(
+                            message=ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE
+                        )
+                    active_count = self._repository.count_active_enrollments_in_class(
+                        academic_class.id
+                    )
+                    if active_count >= academic_class.max_students:
+                        raise UnprocessableEntityException(
+                            message=ENROLLMENT_CLASS_FULL_MESSAGE
+                        )
+
+                old_values = {
+                    "status": previous_status.value,
+                    "student_id": str(enrollment.student_id),
+                    "class_id": str(enrollment.class_id),
+                }
+                new_values = {
+                    "status": payload.status.value,
+                    "student_id": str(enrollment.student_id),
+                    "class_id": str(enrollment.class_id),
+                    "justification": payload.justification,
+                }
+
+                try:
+                    self._repository.update_status(
+                        enrollment,
+                        new_status=payload.status,
+                    )
+                    self._audit_service.log_action(
+                        user_id=current_user.id,
+                        action="ENROLLMENT_STATUS_UPDATED",
+                        entity="enrollments",
+                        entity_id=str(enrollment.id),
+                        old_values=old_values,
+                        new_values=new_values,
+                        ip_address=ip_address,
+                        commit=False,
+                    )
+                    updated = self._repository.commit_and_refresh(enrollment)
+                except IntegrityError as exc:
+                    self._repository.rollback()
+                    error_text = str(exc).lower()
+                    if "chk_enrollments_class_capacity" in error_text:
+                        raise UnprocessableEntityException(
+                            message=ENROLLMENT_CLASS_FULL_MESSAGE
+                        ) from exc
+                    raise
+
+                logger.bind(
+                    enrollment_id=str(updated.id),
+                    student_id=str(updated.student_id),
+                    class_id=str(updated.class_id),
+                    previous_status=previous_status.value,
+                    new_status=updated.status.value,
+                    actor_id=str(current_user.id),
+                ).info("Status da matrícula atualizado com auditoria registrada.")
+                return self._to_response(updated)
+
 
 def get_enrollment_service(
     repository: EnrollmentRepositoryDep,
+    audit_service: AuditServiceDep,
 ) -> EnrollmentService:
     """Provedor de injeção de dependência para EnrollmentService."""
-    return EnrollmentService(repository=repository)
+    return EnrollmentService(
+        repository=repository,
+        audit_service=audit_service,
+    )
 
 
 EnrollmentServiceDep = Annotated[
@@ -203,6 +312,8 @@ __all__ = [
     "ENROLLMENT_INACTIVE_COURSE_MESSAGE",
     "ENROLLMENT_INACTIVE_STUDENT_MESSAGE",
     "ENROLLMENT_INVALID_STUDENT_ROLE_MESSAGE",
+    "ENROLLMENT_NOT_FOUND_MESSAGE",
+    "ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE",
     "ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE",
     "EnrollmentService",
     "EnrollmentServiceDep",

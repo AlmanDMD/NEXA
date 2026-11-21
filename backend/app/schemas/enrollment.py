@@ -6,10 +6,12 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import Field, field_validator
+from pydantic_core import PydanticCustomError
 
 from app.schemas.academic_class import validate_iso_date_pt
 from app.schemas.base import BaseResponseSchema, EntityResponseSchema, StrictRequestSchema
 from app.schemas.enums import ClassStatus, EnrollmentStatus, Shift, UserRole
+from app.schemas.validators import sanitize_optional_text
 
 _DECIMAL_QUANTIZER = Decimal("0.01")
 
@@ -100,9 +102,44 @@ class EnrollmentResponseSchema(EntityResponseSchema):
         return value.quantize(_DECIMAL_QUANTIZER)
 
 
+class EnrollmentStatusUpdateSchema(StrictRequestSchema):
+    """Schema de entrada para alteração de status de matrícula (PATCH /api/v1/enrollments/{id}/status)."""
+
+    status: EnrollmentStatus = Field(
+        description="Novo status da matrícula (ACTIVE, COMPLETED, DROPPED, SUSPENDED)",
+        examples=[EnrollmentStatus.DROPPED],
+    )
+    justification: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Justificativa opcional para a alteração de status da matrícula",
+        examples=["Solicitação formal de trancamento protocolada na secretaria."],
+    )
+
+    @field_validator("justification", mode="before")
+    @classmethod
+    def validate_justification_pt(cls, value: Any) -> str | None:
+        """Sanitiza a justificativa opcional e valida comprimento/conteúdo seguro."""
+        cleaned = sanitize_optional_text(value, collapse_spaces=True)
+        if cleaned is None:
+            return None
+        if "<" in cleaned or ">" in cleaned:
+            raise PydanticCustomError(
+                "justification_invalid_chars",
+                "A justificativa contém caracteres não permitidos.",
+            )
+        if len(cleaned) > 500:
+            raise PydanticCustomError(
+                "justification_too_long",
+                "A justificativa deve ter no máximo 500 caracteres.",
+            )
+        return cleaned
+
+
 __all__ = [
     "EnrollmentClassSummarySchema",
     "EnrollmentCreateSchema",
     "EnrollmentResponseSchema",
+    "EnrollmentStatusUpdateSchema",
     "EnrollmentStudentSummarySchema",
 ]

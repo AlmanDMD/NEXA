@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
+from app.models.base import _utc_now
 from app.models.enrollment import Enrollment
 from app.models.user import User
 from app.schemas.enums import EnrollmentStatus
@@ -106,6 +107,39 @@ class EnrollmentRepository:
     def rollback(self) -> None:
         """Reverte a transação ativa em caso de conflito ou falha de integridade."""
         self._session.rollback()
+
+    def update_status(
+        self,
+        enrollment: Enrollment,
+        *,
+        new_status: EnrollmentStatus,
+    ) -> Enrollment:
+        """Atualiza o status da matrícula e registra timestamp na transação ativa."""
+        enrollment.status = new_status
+        enrollment.updated_at = _utc_now()
+        self._session.add(enrollment)
+        self._session.flush()
+        return enrollment
+
+    def commit_and_refresh(self, enrollment: Enrollment) -> Enrollment:
+        """Efetiva commit atômico da transação (matrícula + auditoria) e recarrega relacionamentos."""
+        self._session.commit()
+        self._session.refresh(enrollment)
+        return self.get_by_id(enrollment.id) or enrollment
+
+    def list_eligible_for_attendance(self, class_id: UUID) -> list[Enrollment]:
+        """Lista apenas matrículas ACTIVE elegíveis para chamada e cálculo de faltas futuras."""
+        stmt = (
+            select(Enrollment)
+            .options(
+                joinedload(Enrollment.student).selectinload(User.profile),
+            )
+            .where(
+                Enrollment.class_id == class_id,
+                Enrollment.status == EnrollmentStatus.ACTIVE,
+            )
+        )
+        return list(self._session.scalars(stmt).unique().all())
 
 
 def get_enrollment_repository(session: DbSessionDep) -> EnrollmentRepository:

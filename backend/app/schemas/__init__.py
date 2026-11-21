@@ -77,6 +77,7 @@ from app.schemas.enrollment import (
     EnrollmentClassSummarySchema,
     EnrollmentCreateSchema,
     EnrollmentResponseSchema,
+    EnrollmentStatusUpdateSchema,
     EnrollmentStudentSummarySchema,
 )
 from app.schemas.enums import (
@@ -193,6 +194,7 @@ __all__ = [
     "EnrollmentCreateSchema",
     "EnrollmentResponseSchema",
     "EnrollmentStatus",
+    "EnrollmentStatusUpdateSchema",
     "EnrollmentStudentSummarySchema",
     "EntityResponseSchema",
     "ErrorDetail",
