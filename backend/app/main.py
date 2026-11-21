@@ -17,6 +17,7 @@ from app.routers.enrollments import router as enrollments_router
 from app.routers.health import router as health_router
 from app.routers.learning_modules import router as learning_modules_router
 from app.routers.subjects import router as subjects_router
+from app.routers.teacher_assignments import router as teacher_assignments_router
 
 
 @asynccontextmanager
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     application.include_router(learning_modules_router)
     application.include_router(competencies_router)
     application.include_router(enrollments_router)
+    application.include_router(teacher_assignments_router)
 
     return application
 
