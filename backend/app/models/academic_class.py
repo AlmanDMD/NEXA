@@ -21,6 +21,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.schemas.enums import ClassStatus, Shift
 
 if TYPE_CHECKING:
+    from app.models.class_lesson import ClassLesson
     from app.models.course import Course
     from app.models.enrollment import Enrollment
     from app.models.teacher_assignment import TeacherAssignment
@@ -95,6 +96,11 @@ class AcademicClass(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     teacher_assignments: Mapped[list["TeacherAssignment"]] = relationship(
         "TeacherAssignment",
+        back_populates="academic_class",
+        passive_deletes=True,
+    )
+    lessons: Mapped[list["ClassLesson"]] = relationship(
+        "ClassLesson",
         back_populates="academic_class",
         passive_deletes=True,
     )
