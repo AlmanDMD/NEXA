@@ -12,7 +12,7 @@ from pydantic_core import PydanticCustomError
 
 from app.schemas.academic_class import ISODate, validate_iso_date_pt
 from app.schemas.base import BaseResponseSchema, StrictRequestSchema, UUIDResponseMixin
-from app.schemas.enums import AttendanceStatus, RiskLevel
+from app.schemas.enums import AttendanceStatus, EnrollmentStatus, RiskLevel
 from app.schemas.validators import sanitize_optional_text, sanitize_text
 
 _INT_PATTERN: re.Pattern[str] = re.compile(r"^[+-]?\d+$")
@@ -428,6 +428,327 @@ class BatchAttendanceResponseSchema(BaseResponseSchema):
     )
 
 
+class StudentAttendanceQueryParams(StrictRequestSchema):
+    """Filtros opcionais para consulta de frequência consolidada do estudante (BE-023)."""
+
+    class_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da turma acadêmica",
+    )
+    subject_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da disciplina técnica",
+    )
+
+
+type StudentAttendanceQueryParamsDep = Annotated[StudentAttendanceQueryParams, Query()]
+
+
+class StudentAttendanceSummaryStudentSchema(BaseResponseSchema):
+    """Identificação resumida do estudante no extrato consolidado de frequência."""
+
+    id: UUID = Field(description="Identificador UUID do estudante")
+    email: str = Field(description="E-mail institucional do estudante")
+    full_name: str | None = Field(
+        default=None,
+        description="Nome completo do estudante",
+    )
+    registration_number: str | None = Field(
+        default=None,
+        description="Matrícula acadêmica SENAI do estudante",
+    )
+
+
+class ModuleAttendanceRiskItemSchema(BaseResponseSchema):
+    """Indicadores consolidados de frequência e margem de 75% por módulo prático (vw_module_attendance_risk)."""
+
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula na turma")
+    class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
+    class_code: str = Field(description="Código da turma (ex: USI-2026-1M)")
+    class_period: str = Field(description="Período letivo da turma (ex: 2026.1)")
+    subject_id: UUID = Field(description="Identificador UUID da disciplina técnica")
+    subject_code: str = Field(description="Código da disciplina técnica")
+    subject_name: str = Field(description="Nome da disciplina técnica")
+    module_id: UUID = Field(description="Identificador UUID do módulo de aprendizagem prática")
+    module_title: str = Field(description="Título do módulo prático (ex: Tornearia, Metrologia)")
+    order_index: int = Field(ge=1, description="Ordem didática do módulo na disciplina")
+    planned_hours: int = Field(
+        ge=0,
+        description="Carga horária prática prevista para o módulo",
+    )
+    total_hours: int = Field(
+        ge=0,
+        description="Total de horas-aula ministradas no módulo até o momento",
+    )
+    attended_hours: int = Field(
+        ge=0,
+        description="Total de horas com presença computada para o estudante no módulo",
+    )
+    absent_hours: int = Field(
+        ge=0,
+        description="Total de horas de faltas não justificadas no módulo",
+    )
+    justified_absent_hours: int = Field(
+        ge=0,
+        description="Total de horas de ausências justificadas (JUSTIFIED) no módulo",
+    )
+    attendance_percentage: Decimal = Field(
+        description="Percentual exato de presença no módulo (0.00 a 100.00%)",
+        examples=["85.00"],
+    )
+    is_critical: bool = Field(
+        description="Alerta preventivo quando o percentual de presença é inferior a 78% (< 78.00%)",
+    )
+    is_attendance_critical: bool = Field(
+        description="Flag booleana da view vw_module_attendance_risk (< 78.00%)",
+    )
+    risk_level: RiskLevel = Field(
+        description="Nível de risco avaliado pelo motor preventivo (LOW, HIGH <78%, CRITICAL <75%)",
+    )
+    min_required_percentage: Decimal = Field(
+        description="Percentual mínimo legal exigido para aprovação por frequência (75.00%)",
+        examples=["75.00"],
+    )
+    max_allowed_absent_hours: Decimal = Field(
+        description="Limite máximo de horas de falta (25%) proporcional às horas já ministradas",
+        examples=["5.00"],
+    )
+    remaining_absent_hours_margin: Decimal = Field(
+        description="Margem restante de horas de falta sobre as aulas ministradas antes do limite de 75%",
+        examples=["1.00"],
+    )
+    planned_max_allowed_absent_hours: Decimal = Field(
+        description="Limite máximo de horas de falta (25%) sobre a carga horária prevista do módulo",
+        examples=["10.00"],
+    )
+    planned_remaining_absent_hours_margin: Decimal = Field(
+        description="Saldo restante de horas que o aluno ainda pode faltar no módulo antes do limite de 75%",
+        examples=["6.00"],
+    )
+    percentage_margin_to_limit: Decimal = Field(
+        description="Margem percentual atual em relação ao limite mínimo de 75.00% (attendance_percentage - 75.00)",
+        examples=["10.00"],
+    )
+
+    @field_validator(
+        "attendance_percentage",
+        "min_required_percentage",
+        "max_allowed_absent_hours",
+        "remaining_absent_hours_margin",
+        "planned_max_allowed_absent_hours",
+        "planned_remaining_absent_hours_margin",
+        "percentage_margin_to_limit",
+        mode="after",
+    )
+    @classmethod
+    def quantize_decimal_metrics(cls, value: Decimal) -> Decimal:
+        """Padroniza os indicadores decimais com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class SubjectConsolidatedAttendanceSchema(BaseResponseSchema):
+    """Histórico consolidado de frequência do estudante agrupado por disciplina e seus módulos práticos."""
+
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula na turma")
+    class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
+    class_code: str = Field(description="Código da turma acadêmica")
+    class_period: str = Field(description="Período letivo da turma")
+    subject_id: UUID = Field(description="Identificador UUID da disciplina técnica")
+    subject_code: str = Field(description="Código da disciplina técnica")
+    subject_name: str = Field(description="Nome da disciplina técnica")
+    planned_hours: int = Field(ge=0, description="Carga horária prevista da disciplina")
+    total_hours: int = Field(ge=0, description="Total de horas ministradas na disciplina")
+    attended_hours: int = Field(ge=0, description="Total de horas com presença na disciplina")
+    absent_hours: int = Field(ge=0, description="Total de horas de falta não justificada na disciplina")
+    justified_absent_hours: int = Field(
+        ge=0,
+        description="Total de horas de falta justificada na disciplina",
+    )
+    attendance_percentage: Decimal = Field(
+        description="Percentual consolidado de presença na disciplina (0.00 a 100.00%)",
+    )
+    is_critical: bool = Field(
+        description="Indica se a frequência da disciplina está abaixo de 78% (< 78.00%)",
+    )
+    is_attendance_critical: bool = Field(
+        description="Indica se a frequência da disciplina está abaixo do limiar preventivo de 78%",
+    )
+    risk_level: RiskLevel = Field(
+        description="Nível de risco de frequência na disciplina (LOW, HIGH, CRITICAL)",
+    )
+    min_required_percentage: Decimal = Field(
+        description="Limite mínimo legal de frequência (75.00%)",
+    )
+    max_allowed_absent_hours: Decimal = Field(
+        description="Teto de 25% de faltas sobre as horas ministradas na disciplina",
+    )
+    remaining_absent_hours_margin: Decimal = Field(
+        description="Margem restante de horas de falta sobre as horas ministradas na disciplina",
+    )
+    planned_max_allowed_absent_hours: Decimal = Field(
+        description="Teto de 25% de faltas sobre a carga horária prevista da disciplina",
+    )
+    planned_remaining_absent_hours_margin: Decimal = Field(
+        description="Saldo restante de horas que o aluno pode faltar na disciplina antes do limite de 75%",
+    )
+    percentage_margin_to_limit: Decimal = Field(
+        description="Margem percentual até o limite de 75.00% na disciplina",
+    )
+    modules: list[ModuleAttendanceRiskItemSchema] = Field(
+        default_factory=list,
+        description="Lista de módulos práticos da disciplina ordenados por order_index",
+    )
+
+    @field_validator(
+        "attendance_percentage",
+        "min_required_percentage",
+        "max_allowed_absent_hours",
+        "remaining_absent_hours_margin",
+        "planned_max_allowed_absent_hours",
+        "planned_remaining_absent_hours_margin",
+        "percentage_margin_to_limit",
+        mode="after",
+    )
+    @classmethod
+    def quantize_decimal_metrics(cls, value: Decimal) -> Decimal:
+        """Padroniza os indicadores decimais com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class StudentLessonAbsenceRecordSchema(BaseResponseSchema):
+    """Registro individual de falta, atraso ou justificativa por data de aula para o extrato do aluno."""
+
+    attendance_record_id: UUID = Field(description="Identificador UUID do registro de chamada")
+    lesson_id: UUID = Field(description="Identificador UUID da aula ministrada")
+    class_id: UUID = Field(description="Identificador UUID da turma")
+    subject_id: UUID = Field(description="Identificador UUID da disciplina")
+    subject_code: str = Field(description="Código da disciplina")
+    subject_name: str = Field(description="Nome da disciplina")
+    module_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do módulo prático (quando vinculado)",
+    )
+    module_title: str | None = Field(
+        default=None,
+        description="Título do módulo prático (quando vinculado)",
+    )
+    lesson_date: date = Field(description="Data da aula em que ocorreu a ausência/atraso")
+    workload_hours: int = Field(ge=1, le=8, description="Carga horária total da aula")
+    status: AttendanceStatus = Field(
+        description="Situação registrada na chamada (ABSENT, LATE, JUSTIFIED)",
+    )
+    absent_hours: int = Field(ge=0, le=8, description="Horas de ausência registradas na aula")
+    justification_note: str | None = Field(
+        default=None,
+        description="Justificativa ou observação registrada pelo docente",
+    )
+    recorded_at: datetime = Field(description="Data/hora da gravação na chamada")
+
+
+class StudentConsolidatedAttendanceResponseSchema(BaseResponseSchema):
+    """Resposta consolidada do extrato de frequência do estudante por disciplina e módulo (BE-023)."""
+
+    student_id: UUID = Field(description="Identificador UUID do estudante consultado")
+    student: StudentAttendanceSummaryStudentSchema = Field(
+        description="Dados cadastrais resumidos do estudante",
+    )
+    enrollment_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da matrícula principal/filtrada do estudante",
+    )
+    class_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da turma principal/filtrada do estudante",
+    )
+    enrollment_status: EnrollmentStatus | None = Field(
+        default=None,
+        description="Status da matrícula principal/filtrada do estudante",
+    )
+    planned_hours: int = Field(
+        ge=0,
+        description="Carga horária total prevista nas disciplinas/módulos consultados",
+    )
+    total_hours: int = Field(
+        ge=0,
+        description="Total consolidado de horas-aula ministradas para o estudante",
+    )
+    attended_hours: int = Field(
+        ge=0,
+        description="Total consolidado de horas com presença do estudante",
+    )
+    absent_hours: int = Field(
+        ge=0,
+        description="Total consolidado de horas de faltas não justificadas",
+    )
+    justified_absent_hours: int = Field(
+        ge=0,
+        description="Total consolidado de horas de faltas justificadas (JUSTIFIED)",
+    )
+    attendance_percentage: Decimal = Field(
+        description="Percentual consolidado de presença do estudante (0.00 a 100.00%)",
+        examples=["85.00"],
+    )
+    is_critical: bool = Field(
+        description="Flag de risco preventivo indicando frequência abaixo de 78% (< 78.00%)",
+    )
+    is_attendance_critical: bool = Field(
+        description="Alias compatível com vw_module_attendance_risk para frequência < 78.00%",
+    )
+    risk_level: RiskLevel = Field(
+        description="Nível de risco consolidado de frequência (LOW, HIGH <78%, CRITICAL <75%)",
+    )
+    min_required_percentage: Decimal = Field(
+        description="Limite mínimo legal de presença exigido (75.00%)",
+        examples=["75.00"],
+    )
+    max_allowed_absent_hours: Decimal = Field(
+        description="Limite máximo de horas de falta (25%) sobre as horas já ministradas",
+    )
+    remaining_absent_hours_margin: Decimal = Field(
+        description="Margem restante em horas sobre as aulas ministradas até o limite de 75%",
+    )
+    planned_max_allowed_absent_hours: Decimal = Field(
+        description="Limite máximo de horas de falta (25%) sobre a carga horária prevista",
+    )
+    planned_remaining_absent_hours_margin: Decimal = Field(
+        description="Saldo restante em horas que o aluno ainda pode faltar na carga prevista antes de 75%",
+    )
+    percentage_margin_to_limit: Decimal = Field(
+        description="Margem percentual atual até o limite mínimo de 75.00%",
+    )
+    critical_modules_count: int = Field(
+        ge=0,
+        description="Quantidade de módulos práticos com frequência crítica (< 78.00%)",
+    )
+    subjects: list[SubjectConsolidatedAttendanceSchema] = Field(
+        default_factory=list,
+        description="Extrato de frequência agrupado por disciplina técnica e seus módulos práticos",
+    )
+    modules: list[ModuleAttendanceRiskItemSchema] = Field(
+        default_factory=list,
+        description="Lista consolidada de módulos práticos consultados da view vw_module_attendance_risk",
+    )
+    absence_records: list[StudentLessonAbsenceRecordSchema] = Field(
+        default_factory=list,
+        description="Histórico cronológico de faltas, atrasos e ausências justificadas por data de aula",
+    )
+
+    @field_validator(
+        "attendance_percentage",
+        "min_required_percentage",
+        "max_allowed_absent_hours",
+        "remaining_absent_hours_margin",
+        "planned_max_allowed_absent_hours",
+        "planned_remaining_absent_hours_margin",
+        "percentage_margin_to_limit",
+        mode="after",
+    )
+    @classmethod
+    def quantize_decimal_metrics(cls, value: Decimal) -> Decimal:
+        """Padroniza os indicadores decimais com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
 __all__ = [
     "AbsentHoursInt",
     "AttendanceRecordItemInputSchema",
@@ -443,8 +764,15 @@ __all__ = [
     "LessonTeacherSummarySchema",
     "LessonTopicSummaryStr",
     "LessonWorkloadHoursInt",
+    "ModuleAttendanceRiskItemSchema",
     "OptionalJustificationNoteStr",
     "OptionalLabEnvironmentStr",
+    "StudentAttendanceQueryParams",
+    "StudentAttendanceQueryParamsDep",
+    "StudentAttendanceSummaryStudentSchema",
+    "StudentConsolidatedAttendanceResponseSchema",
+    "StudentLessonAbsenceRecordSchema",
+    "SubjectConsolidatedAttendanceSchema",
     "UpdatedEnrollmentAttendanceSchema",
     "validate_absent_hours_pt",
     "validate_justification_note_pt",
