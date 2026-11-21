@@ -4,6 +4,7 @@ from app.routers.auth import router as auth_router
 from app.routers.classes import router as classes_router
 from app.routers.competencies import router as competencies_router
 from app.routers.courses import router as courses_router
+from app.routers.enrollments import router as enrollments_router
 from app.routers.health import router as health_router
 from app.routers.learning_modules import router as learning_modules_router
 from app.routers.subjects import router as subjects_router
@@ -13,6 +14,7 @@ __all__ = [
     "classes_router",
     "competencies_router",
     "courses_router",
+    "enrollments_router",
     "health_router",
     "learning_modules_router",
     "subjects_router",
