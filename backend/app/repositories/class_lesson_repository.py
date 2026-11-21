@@ -1,6 +1,8 @@
 """Repositório SQLAlchemy 2.0 para Diário de Classe e pré-inicialização de chamada (BE-021)."""
 
+from collections.abc import Sequence
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated
 from uuid import UUID
 
@@ -10,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
+from app.models.base import _utc_now
 from app.models.class_lesson import AttendanceRecord, ClassLesson
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
@@ -204,6 +207,125 @@ class ClassLessonRepository:
         )
         items = list(self._session.scalars(items_stmt).unique().all())
         return items, total
+
+    def get_enrollments_by_class(self, class_id: UUID) -> dict[UUID, Enrollment]:
+        """Retorna mapa {student_id: Enrollment} de todas as matrículas vinculadas à turma."""
+        stmt = select(Enrollment).where(Enrollment.class_id == class_id)
+        enrollments = list(self._session.scalars(stmt).all())
+        return {enr.student_id: enr for enr in enrollments}
+
+    def get_existing_attendance_by_lesson(
+        self,
+        lesson_id: UUID,
+    ) -> dict[UUID, AttendanceRecord]:
+        """Retorna mapa {student_id: AttendanceRecord} dos registros já existentes para a aula."""
+        stmt = select(AttendanceRecord).where(AttendanceRecord.lesson_id == lesson_id)
+        records = list(self._session.scalars(stmt).all())
+        return {rec.student_id: rec for rec in records}
+
+    def recalculate_class_enrollments_attendance_rates(
+        self,
+        *,
+        class_id: UUID,
+        student_ids: Sequence[UUID],
+    ) -> dict[UUID, Decimal]:
+        """Recalcula no servidor o attendance_rate consolidado em enrollments para os alunos informados."""
+        target_ids = list(dict.fromkeys(student_ids))
+        if not target_ids:
+            return {}
+
+        stmt = (
+            select(
+                AttendanceRecord.student_id,
+                AttendanceRecord.status,
+                AttendanceRecord.absent_hours,
+                ClassLesson.workload_hours,
+            )
+            .join(ClassLesson, ClassLesson.id == AttendanceRecord.lesson_id)
+            .where(
+                ClassLesson.class_id == class_id,
+                AttendanceRecord.student_id.in_(target_ids),
+            )
+        )
+        rows = self._session.execute(stmt).all()
+
+        totals: dict[UUID, list[int]] = {sid: [0, 0] for sid in target_ids}
+        for student_id, rec_status, absent_hours, lesson_workload in rows:
+            total_hours = int(lesson_workload)
+            if rec_status in (AttendanceStatus.PRESENT, AttendanceStatus.JUSTIFIED):
+                effective_absent = 0
+            else:
+                effective_absent = min(total_hours, max(0, int(absent_hours)))
+            attended = max(0, total_hours - effective_absent)
+            totals[student_id][0] += attended
+            totals[student_id][1] += total_hours
+
+        rates_by_student: dict[UUID, Decimal] = {}
+        for sid, (attended_sum, total_sum) in totals.items():
+            if total_sum <= 0:
+                rate = Decimal("100.00")
+            else:
+                rate = (
+                    (Decimal(attended_sum) * Decimal("100")) / Decimal(total_sum)
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            rates_by_student[sid] = rate
+
+        enrollments = list(
+            self._session.scalars(
+                select(Enrollment).where(
+                    Enrollment.class_id == class_id,
+                    Enrollment.student_id.in_(target_ids),
+                )
+            ).all()
+        )
+        now = _utc_now()
+        for enrollment in enrollments:
+            enrollment.attendance_rate = rates_by_student.get(
+                enrollment.student_id,
+                Decimal("100.00"),
+            )
+            enrollment.updated_at = now
+            self._session.add(enrollment)
+
+        return rates_by_student
+
+    def upsert_batch_attendance(
+        self,
+        *,
+        lesson: ClassLesson,
+        normalized_items: Sequence[tuple[Enrollment, AttendanceStatus, int, str | None]],
+    ) -> dict[UUID, Decimal]:
+        """Executa upsert transacional em attendance_records e recalcula attendance_rate na mesma transação."""
+        existing_map = self.get_existing_attendance_by_lesson(lesson.id)
+        now = _utc_now()
+
+        for enrollment, rec_status, absent_hours, justification_note in normalized_items:
+            existing = existing_map.get(enrollment.student_id)
+            if existing is not None:
+                existing.status = rec_status
+                existing.absent_hours = absent_hours
+                existing.justification_note = justification_note
+                existing.recorded_at = now
+                self._session.add(existing)
+            else:
+                new_record = AttendanceRecord(
+                    lesson_id=lesson.id,
+                    enrollment_id=enrollment.id,
+                    student_id=enrollment.student_id,
+                    status=rec_status,
+                    absent_hours=absent_hours,
+                    justification_note=justification_note,
+                    recorded_at=now,
+                )
+                self._session.add(new_record)
+
+        self._session.flush()
+        rates_by_student = self.recalculate_class_enrollments_attendance_rates(
+            class_id=lesson.class_id,
+            student_ids=[enr.student_id for enr, _, _, _ in normalized_items],
+        )
+        self._session.commit()
+        return rates_by_student
 
 
 def get_class_lesson_repository(session: DbSessionDep) -> ClassLessonRepository:

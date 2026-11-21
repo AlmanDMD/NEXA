@@ -8,6 +8,8 @@ from app.core.security import require_role
 from app.models.user import User
 from app.schemas.base import UUIDPathParam
 from app.schemas.class_lesson import (
+    BatchAttendanceRequestSchema,
+    BatchAttendanceResponseSchema,
     ClassLessonCreateSchema,
     ClassLessonListParamsDep,
     ClassLessonPaginatedResponseSchema,
@@ -59,6 +61,29 @@ async def list_class_lessons(
     return lesson_service.list_class_lessons(
         class_id,
         params,
+        current_user=current_user,
+    )
+
+
+@router.post(
+    "/lessons/{lesson_id}/attendance",
+    response_model=BatchAttendanceResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Registrar chamada rápida em lote e recalcular frequência na matrícula",
+)
+async def record_batch_attendance(
+    lesson_id: UUIDPathParam,
+    payload: BatchAttendanceRequestSchema,
+    lesson_service: ClassLessonServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> BatchAttendanceResponseSchema:
+    """Executa upsert transacional da chamada da aula e recalcula attendance_rate no servidor."""
+    return lesson_service.record_batch_attendance(
+        lesson_id,
+        payload,
         current_user=current_user,
     )
 
