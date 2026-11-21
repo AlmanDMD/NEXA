@@ -3,17 +3,23 @@
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import func, select
+from sqlalchemy import case, func, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
 from app.models.base import _utc_now
-from app.models.class_lesson import AttendanceRecord, ClassLesson
+from app.models.class_lesson import (
+    AttendanceRecord,
+    ClassLesson,
+    VW_MODULE_ATTENDANCE_RISK_CREATE_SQL,
+    VW_MODULE_ATTENDANCE_RISK_NAME,
+    vw_module_attendance_risk_table,
+)
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.subject import Subject
@@ -326,6 +332,144 @@ class ClassLessonRepository:
         )
         self._session.commit()
         return rates_by_student
+
+    def ensure_module_attendance_risk_view(self) -> None:
+        """Garante que a view analítica vw_module_attendance_risk (DB-037) exista na conexão atual."""
+        bind = self._session.get_bind()
+        view_names = {name.lower() for name in inspect(bind).get_view_names()}
+        if VW_MODULE_ATTENDANCE_RISK_NAME.lower() not in view_names:
+            self._session.execute(text(VW_MODULE_ATTENDANCE_RISK_CREATE_SQL))
+            self._session.commit()
+
+    def list_student_enrollments(
+        self,
+        student_id: UUID,
+        *,
+        class_id: UUID | None = None,
+    ) -> list[Enrollment]:
+        """Lista matrículas do estudante priorizando status ACTIVE e data de matrícula mais recente."""
+        stmt = (
+            select(Enrollment)
+            .options(joinedload(Enrollment.academic_class).joinedload(AcademicClass.course))
+            .where(Enrollment.student_id == student_id)
+        )
+        if class_id is not None:
+            stmt = stmt.where(Enrollment.class_id == class_id)
+
+        active_priority = case(
+            (Enrollment.status == EnrollmentStatus.ACTIVE, 0),
+            else_=1,
+        )
+        stmt = stmt.order_by(
+            active_priority.asc(),
+            Enrollment.enrollment_date.desc(),
+            Enrollment.created_at.desc(),
+            Enrollment.id.asc(),
+        )
+        return list(self._session.scalars(stmt).all())
+
+    def get_teacher_assigned_class_ids(
+        self,
+        teacher_id: UUID,
+        *,
+        class_ids: Sequence[UUID] | None = None,
+    ) -> set[UUID]:
+        """Retorna o conjunto de UUIDs de turmas nas quais o docente possui atribuição ativa."""
+        stmt = select(TeacherAssignment.class_id).where(
+            TeacherAssignment.teacher_id == teacher_id
+        )
+        if class_ids is not None:
+            target_ids = list(dict.fromkeys(class_ids))
+            if not target_ids:
+                return set()
+            stmt = stmt.where(TeacherAssignment.class_id.in_(target_ids))
+
+        return set(self._session.scalars(stmt).all())
+
+    def list_course_subjects_by_course_ids(
+        self,
+        course_ids: Sequence[UUID],
+        *,
+        subject_id: UUID | None = None,
+    ) -> list[Subject]:
+        """Lista disciplinas vinculadas aos cursos informados ordenadas por código e nome."""
+        target_course_ids = list(dict.fromkeys(course_ids))
+        if not target_course_ids:
+            return []
+
+        stmt = select(Subject).where(Subject.course_id.in_(target_course_ids))
+        if subject_id is not None:
+            stmt = stmt.where(Subject.id == subject_id)
+
+        stmt = stmt.order_by(Subject.code.asc(), Subject.name.asc(), Subject.id.asc())
+        return list(self._session.scalars(stmt).all())
+
+    def query_module_attendance_risk_view(
+        self,
+        student_id: UUID,
+        *,
+        class_ids: Sequence[UUID],
+        subject_id: UUID | None = None,
+    ) -> list[dict[str, Any]]:
+        """Consulta a view vw_module_attendance_risk (DB-037) para o estudante e turmas informadas."""
+        target_class_ids = list(dict.fromkeys(class_ids))
+        if not target_class_ids:
+            return []
+
+        self.ensure_module_attendance_risk_view()
+        vw = vw_module_attendance_risk_table
+        stmt = (
+            select(vw)
+            .where(
+                vw.c.student_id == student_id,
+                vw.c.class_id.in_(target_class_ids),
+            )
+            .order_by(
+                vw.c.subject_code.asc(),
+                vw.c.module_order_index.asc(),
+                vw.c.module_title.asc(),
+            )
+        )
+        if subject_id is not None:
+            stmt = stmt.where(vw.c.subject_id == subject_id)
+
+        rows = self._session.execute(stmt).mappings().all()
+        return [dict(row) for row in rows]
+
+    def list_student_attendance_records_with_lessons(
+        self,
+        student_id: UUID,
+        *,
+        class_ids: Sequence[UUID],
+        subject_id: UUID | None = None,
+    ) -> list[tuple[AttendanceRecord, ClassLesson]]:
+        """Lista registros de chamada do estudante com dados da aula, disciplina e módulo."""
+        target_class_ids = list(dict.fromkeys(class_ids))
+        if not target_class_ids:
+            return []
+
+        stmt = (
+            select(AttendanceRecord, ClassLesson)
+            .join(ClassLesson, ClassLesson.id == AttendanceRecord.lesson_id)
+            .options(
+                joinedload(ClassLesson.subject),
+                joinedload(ClassLesson.module),
+            )
+            .where(
+                AttendanceRecord.student_id == student_id,
+                ClassLesson.class_id.in_(target_class_ids),
+            )
+            .order_by(
+                ClassLesson.lesson_date.desc(),
+                AttendanceRecord.recorded_at.desc(),
+                ClassLesson.id.desc(),
+            )
+        )
+        if subject_id is not None:
+            stmt = stmt.where(ClassLesson.subject_id == subject_id)
+
+        rows = self._session.execute(stmt).all()
+        return [(row[0], row[1]) for row in rows]
 
 
 def get_class_lesson_repository(session: DbSessionDep) -> ClassLessonRepository:

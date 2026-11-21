@@ -4,7 +4,14 @@ from app.models.academic_class import AcademicClass
 from app.models.audit_log import AuditLog
 from app.models.auth_session import AuthSession
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.class_lesson import AttendanceRecord, ClassLesson
+from app.models.class_lesson import (
+    AttendanceRecord,
+    ClassLesson,
+    VW_MODULE_ATTENDANCE_RISK_CREATE_SQL,
+    VW_MODULE_ATTENDANCE_RISK_DROP_SQL,
+    VW_MODULE_ATTENDANCE_RISK_NAME,
+    vw_module_attendance_risk_table,
+)
 from app.models.competency import Competency
 from app.models.course import Course
 from app.models.enrollment import Enrollment
@@ -32,4 +39,8 @@ __all__ = [
     "UUIDPrimaryKeyMixin",
     "User",
     "UserProfile",
+    "VW_MODULE_ATTENDANCE_RISK_CREATE_SQL",
+    "VW_MODULE_ATTENDANCE_RISK_DROP_SQL",
+    "VW_MODULE_ATTENDANCE_RISK_NAME",
+    "vw_module_attendance_risk_table",
 ]

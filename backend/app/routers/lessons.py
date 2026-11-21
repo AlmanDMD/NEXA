@@ -14,6 +14,8 @@ from app.schemas.class_lesson import (
     ClassLessonListParamsDep,
     ClassLessonPaginatedResponseSchema,
     ClassLessonResponseSchema,
+    StudentAttendanceQueryParamsDep,
+    StudentConsolidatedAttendanceResponseSchema,
 )
 from app.schemas.enums import UserRole
 from app.services.class_lesson_service import ClassLessonServiceDep
@@ -84,6 +86,36 @@ async def record_batch_attendance(
     return lesson_service.record_batch_attendance(
         lesson_id,
         payload,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/students/{student_id}/attendance",
+    response_model=StudentConsolidatedAttendanceResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar extrato consolidado de frequência do estudante por disciplina e módulo prático",
+)
+async def get_student_consolidated_attendance(
+    student_id: UUIDPathParam,
+    params: StudentAttendanceQueryParamsDep,
+    lesson_service: ClassLessonServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(
+            require_role(
+                UserRole.ADMIN,
+                UserRole.COORDINATOR,
+                UserRole.TEACHER,
+                UserRole.STUDENT,
+            )
+        ),
+    ],
+) -> StudentConsolidatedAttendanceResponseSchema:
+    """Retorna presenças, faltas, margem até o limite de 75% e alerta (<78%) via vw_module_attendance_risk."""
+    return lesson_service.get_student_consolidated_attendance(
+        student_id,
+        params,
         current_user=current_user,
     )
 

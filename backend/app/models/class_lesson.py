@@ -1,10 +1,11 @@
 """Modelos ORM SQLAlchemy 2.0 para Diário de Classe (class_lessons - DB-021) e Chamada (attendance_records - DB-022)."""
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -12,13 +13,19 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    column,
+    event,
     func,
+    inspect,
+    table,
     text,
 )
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.models.base import Base, UUIDPrimaryKeyMixin, _utc_now
@@ -244,4 +251,244 @@ class AttendanceRecord(Base, UUIDPrimaryKeyMixin):
         return value
 
 
-__all__ = ["AttendanceRecord", "ClassLesson"]
+VW_MODULE_ATTENDANCE_RISK_NAME: Final[str] = "vw_module_attendance_risk"
+
+VW_MODULE_ATTENDANCE_RISK_DROP_SQL: Final[str] = (
+    f"DROP VIEW IF EXISTS {VW_MODULE_ATTENDANCE_RISK_NAME}"
+)
+
+VW_MODULE_ATTENDANCE_RISK_CREATE_SQL: Final[str] = f"""
+CREATE VIEW {VW_MODULE_ATTENDANCE_RISK_NAME} AS
+SELECT
+    e.id AS enrollment_id,
+    e.student_id AS student_id,
+    e.class_id AS class_id,
+    c.code AS class_code,
+    c.period AS class_period,
+    e.status AS enrollment_status,
+    s.id AS subject_id,
+    s.code AS subject_code,
+    s.name AS subject_name,
+    s.workload_hours AS subject_planned_hours,
+    lm.id AS module_id,
+    lm.title AS module_title,
+    lm.order_index AS module_order_index,
+    lm.practical_hours AS module_planned_hours,
+    COALESCE(
+        SUM(CASE WHEN ar.id IS NOT NULL THEN cl.workload_hours ELSE 0 END),
+        0
+    ) AS total_hours,
+    COALESCE(
+        SUM(
+            CASE
+                WHEN ar.id IS NULL THEN 0
+                WHEN ar.status IN ('PRESENT', 'JUSTIFIED') THEN cl.workload_hours
+                ELSE CASE
+                    WHEN cl.workload_hours - CASE
+                        WHEN ar.absent_hours < 0 THEN 0
+                        WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                        ELSE ar.absent_hours
+                    END > 0
+                    THEN cl.workload_hours - CASE
+                        WHEN ar.absent_hours < 0 THEN 0
+                        WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                        ELSE ar.absent_hours
+                    END
+                    ELSE 0
+                END
+            END
+        ),
+        0
+    ) AS attended_hours,
+    COALESCE(
+        SUM(
+            CASE
+                WHEN ar.id IS NULL THEN 0
+                WHEN ar.status IN ('PRESENT', 'JUSTIFIED') THEN 0
+                WHEN ar.absent_hours < 0 THEN 0
+                WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                ELSE ar.absent_hours
+            END
+        ),
+        0
+    ) AS absent_hours,
+    COALESCE(
+        SUM(
+            CASE
+                WHEN ar.id IS NULL THEN 0
+                WHEN ar.status = 'JUSTIFIED' THEN CASE
+                    WHEN ar.absent_hours < 0 THEN 0
+                    WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                    ELSE ar.absent_hours
+                END
+                ELSE 0
+            END
+        ),
+        0
+    ) AS justified_absent_hours,
+    CASE
+        WHEN COALESCE(SUM(CASE WHEN ar.id IS NOT NULL THEN cl.workload_hours ELSE 0 END), 0) <= 0
+        THEN 100.00
+        ELSE ROUND(
+            (
+                CAST(
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN ar.id IS NULL THEN 0
+                                WHEN ar.status IN ('PRESENT', 'JUSTIFIED') THEN cl.workload_hours
+                                ELSE CASE
+                                    WHEN cl.workload_hours - CASE
+                                        WHEN ar.absent_hours < 0 THEN 0
+                                        WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                                        ELSE ar.absent_hours
+                                    END > 0
+                                    THEN cl.workload_hours - CASE
+                                        WHEN ar.absent_hours < 0 THEN 0
+                                        WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                                        ELSE ar.absent_hours
+                                    END
+                                    ELSE 0
+                                END
+                            END
+                        ),
+                        0
+                    ) AS NUMERIC
+                ) * 100.0
+            ) / CAST(
+                SUM(CASE WHEN ar.id IS NOT NULL THEN cl.workload_hours ELSE 0 END) AS NUMERIC
+            ),
+            2
+        )
+    END AS attendance_percentage,
+    CASE
+        WHEN COALESCE(SUM(CASE WHEN ar.id IS NOT NULL THEN cl.workload_hours ELSE 0 END), 0) <= 0
+        THEN 0
+        WHEN (
+            (
+                CAST(
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN ar.id IS NULL THEN 0
+                                WHEN ar.status IN ('PRESENT', 'JUSTIFIED') THEN cl.workload_hours
+                                ELSE CASE
+                                    WHEN cl.workload_hours - CASE
+                                        WHEN ar.absent_hours < 0 THEN 0
+                                        WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                                        ELSE ar.absent_hours
+                                    END > 0
+                                    THEN cl.workload_hours - CASE
+                                        WHEN ar.absent_hours < 0 THEN 0
+                                        WHEN ar.absent_hours > cl.workload_hours THEN cl.workload_hours
+                                        ELSE ar.absent_hours
+                                    END
+                                    ELSE 0
+                                END
+                            END
+                        ),
+                        0
+                    ) AS NUMERIC
+                ) * 100.0
+            ) / CAST(
+                SUM(CASE WHEN ar.id IS NOT NULL THEN cl.workload_hours ELSE 0 END) AS NUMERIC
+            )
+        ) < 78.00
+        THEN 1
+        ELSE 0
+    END AS is_attendance_critical
+FROM enrollments e
+JOIN classes c ON c.id = e.class_id
+JOIN subjects s ON s.course_id = c.course_id
+JOIN learning_modules lm ON lm.subject_id = s.id
+LEFT JOIN class_lessons cl
+    ON cl.class_id = e.class_id
+    AND cl.subject_id = s.id
+    AND cl.module_id = lm.id
+LEFT JOIN attendance_records ar
+    ON ar.lesson_id = cl.id
+    AND ar.student_id = e.student_id
+GROUP BY
+    e.id,
+    e.student_id,
+    e.class_id,
+    c.code,
+    c.period,
+    e.status,
+    s.id,
+    s.code,
+    s.name,
+    s.workload_hours,
+    lm.id,
+    lm.title,
+    lm.order_index,
+    lm.practical_hours
+"""
+
+vw_module_attendance_risk_table = table(
+    VW_MODULE_ATTENDANCE_RISK_NAME,
+    column("enrollment_id", Uuid(as_uuid=True)),
+    column("student_id", Uuid(as_uuid=True)),
+    column("class_id", Uuid(as_uuid=True)),
+    column("class_code", String),
+    column("class_period", String),
+    column("enrollment_status", String),
+    column("subject_id", Uuid(as_uuid=True)),
+    column("subject_code", String),
+    column("subject_name", String),
+    column("subject_planned_hours", Integer),
+    column("module_id", Uuid(as_uuid=True)),
+    column("module_title", String),
+    column("module_order_index", Integer),
+    column("module_planned_hours", Integer),
+    column("total_hours", Integer),
+    column("attended_hours", Integer),
+    column("absent_hours", Integer),
+    column("justified_absent_hours", Integer),
+    column("attendance_percentage", Numeric(5, 2)),
+    column("is_attendance_critical", Boolean),
+)
+
+_VW_REQUIRED_TABLES: Final[frozenset[str]] = frozenset(
+    {
+        "enrollments",
+        "classes",
+        "subjects",
+        "learning_modules",
+        "class_lessons",
+        "attendance_records",
+    }
+)
+
+
+@event.listens_for(Base.metadata, "after_create")
+def _create_vw_module_attendance_risk(
+    _target: Any,
+    connection: Connection,
+    **_kw: Any,
+) -> None:
+    """Cria a view analítica vw_module_attendance_risk (DB-037) após a criação das tabelas base."""
+    existing_tables = set(inspect(connection).get_table_names())
+    if _VW_REQUIRED_TABLES.issubset(existing_tables):
+        connection.execute(text(VW_MODULE_ATTENDANCE_RISK_DROP_SQL))
+        connection.execute(text(VW_MODULE_ATTENDANCE_RISK_CREATE_SQL))
+
+
+@event.listens_for(Base.metadata, "before_drop")
+def _drop_vw_module_attendance_risk(
+    _target: Any,
+    connection: Connection,
+    **_kw: Any,
+) -> None:
+    """Remove a view vw_module_attendance_risk antes do drop das tabelas base."""
+    connection.execute(text(VW_MODULE_ATTENDANCE_RISK_DROP_SQL))
+
+
+__all__ = [
+    "AttendanceRecord",
+    "ClassLesson",
+    "VW_MODULE_ATTENDANCE_RISK_CREATE_SQL",
+    "VW_MODULE_ATTENDANCE_RISK_DROP_SQL",
+    "VW_MODULE_ATTENDANCE_RISK_NAME",
+    "vw_module_attendance_risk_table",
+]

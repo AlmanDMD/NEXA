@@ -69,6 +69,10 @@ from app.services.class_lesson_service import (
     LESSON_SUBJECT_COURSE_MISMATCH_MESSAGE,
     LESSON_SUBJECT_NOT_FOUND_MESSAGE,
     LESSON_TEACHER_FORBIDDEN_MESSAGE,
+    STUDENT_ATTENDANCE_IDOR_FORBIDDEN_MESSAGE,
+    STUDENT_ATTENDANCE_TEACHER_FORBIDDEN_MESSAGE,
+    STUDENT_ENROLLMENT_NOT_FOUND_MESSAGE,
+    STUDENT_NOT_FOUND_MESSAGE,
 )
 
 
@@ -1163,4 +1167,487 @@ async def test_batch_attendance_rejects_unenrolled_student_invalid_payloads_and_
     )
     assert res_admin_ok.status_code == status.HTTP_200_OK
     assert res_admin_ok.json()["total_processed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_student_consolidated_attendance_via_view_margins_and_zero_division(
+    lessons_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida GET /api/v1/students/{id}/attendance agrupado por disciplina/módulo via vw_module_attendance_risk (BE-023)."""
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="extrato023",
+        full_name="Prof. Extrato Frequência",
+        registration_number="SENAI-PROF-0230",
+    )
+    student, student_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="extrato023",
+        full_name="Lucas Andrade",
+        registration_number="SENAI-ALU-0231",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            name="Técnico em Fabricação Mecânica",
+            code="TEC-FAB-023",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="FAB-2026-1M",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subj_usinagem = SubjectRepository(session).create(
+            course_id=course.id,
+            code="USI-101",
+            name="Usinagem Convencional",
+            workload_hours=80,
+            syllabus="Tornearia e fresamento",
+            is_active=True,
+        )
+        subj_metrologia = SubjectRepository(session).create(
+            course_id=course.id,
+            code="MET-102",
+            name="Metrologia Aplicada",
+            workload_hours=40,
+            syllabus="Instrumentos de medição",
+            is_active=True,
+        )
+        mod_tornearia = LearningModuleRepository(session).create(
+            subject_id=subj_usinagem.id,
+            title="Tornearia Cilíndrica",
+            order_index=1,
+            description="Operação de torno mecânico",
+            practical_hours=40,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        mod_fresamento = LearningModuleRepository(session).create(
+            subject_id=subj_usinagem.id,
+            title="Fresamento de Engrenagens",
+            order_index=2,
+            description="Módulo ainda sem aulas ministradas (teste de divisão por zero)",
+            practical_hours=32,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        mod_micrometro = LearningModuleRepository(session).create(
+            subject_id=subj_metrologia.id,
+            title="Medição com Micrômetro",
+            order_index=1,
+            description="Leitura milesimal",
+            practical_hours=20,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subj_usinagem.id,
+                    is_main_teacher=True,
+                ),
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subj_metrologia.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+        session.commit()
+
+    # Registra 5 aulas de 4h (20h) no módulo de Tornearia:
+    # 3 PRESENT, 1 ABSENT (4h), 1 JUSTIFIED (4h -> não penaliza presença) => 16/20 = 80.00%
+    tornearia_statuses = [
+        ("2026-03-02", "PRESENT", 0, None),
+        ("2026-03-03", "PRESENT", 0, None),
+        ("2026-03-04", "ABSENT", 4, "Falta sem justificativa"),
+        ("2026-03-05", "JUSTIFIED", 4, "Atestado médico odontológico"),
+        ("2026-03-06", "PRESENT", 0, None),
+    ]
+    for lesson_date_str, rec_status, absent_h, note in tornearia_statuses:
+        create_res = await lessons_client.post(
+            "/api/v1/lessons",
+            json={
+                "class_id": str(academic_class.id),
+                "subject_id": str(subj_usinagem.id),
+                "module_id": str(mod_tornearia.id),
+                "lesson_date": lesson_date_str,
+                "workload_hours": 4,
+                "topic_summary": f"Aula prática de tornearia em {lesson_date_str}.",
+                "lab_environment": "Oficina de Usinagem 01",
+            },
+            headers={"Authorization": f"Bearer {teacher_token}"},
+        )
+        assert create_res.status_code == status.HTTP_201_CREATED
+        lid = create_res.json()["id"]
+        att_res = await lessons_client.post(
+            f"/api/v1/lessons/{lid}/attendance",
+            json={
+                "records": [
+                    {
+                        "student_id": str(student.id),
+                        "status": rec_status,
+                        "absent_hours": absent_h,
+                        "justification_note": note,
+                    }
+                ]
+            },
+            headers={"Authorization": f"Bearer {teacher_token}"},
+        )
+        assert att_res.status_code == status.HTTP_200_OK
+
+    # Registra 5 aulas de 4h (20h) no módulo de Micrômetro (Metrologia):
+    # 3 PRESENT, 1 ABSENT (4h), 1 LATE (1h) => 15/20 = 75.00% (is_critical=True pois <78%, risk_level=HIGH)
+    metrologia_statuses = [
+        ("2026-03-10", "PRESENT", 0, None),
+        ("2026-03-11", "ABSENT", 4, None),
+        ("2026-03-12", "LATE", 1, "Atraso de 1 hora no transporte"),
+        ("2026-03-13", "PRESENT", 0, None),
+        ("2026-03-14", "PRESENT", 0, None),
+    ]
+    for lesson_date_str, rec_status, absent_h, note in metrologia_statuses:
+        create_res = await lessons_client.post(
+            "/api/v1/lessons",
+            json={
+                "class_id": str(academic_class.id),
+                "subject_id": str(subj_metrologia.id),
+                "module_id": str(mod_micrometro.id),
+                "lesson_date": lesson_date_str,
+                "workload_hours": 4,
+                "topic_summary": f"Aula prática de metrologia em {lesson_date_str}.",
+                "lab_environment": "Laboratório de Metrologia",
+            },
+            headers={"Authorization": f"Bearer {teacher_token}"},
+        )
+        assert create_res.status_code == status.HTTP_201_CREATED
+        lid = create_res.json()["id"]
+        att_res = await lessons_client.post(
+            f"/api/v1/lessons/{lid}/attendance",
+            json={
+                "records": [
+                    {
+                        "student_id": str(student.id),
+                        "status": rec_status,
+                        "absent_hours": absent_h,
+                        "justification_note": note,
+                    }
+                ]
+            },
+            headers={"Authorization": f"Bearer {teacher_token}"},
+        )
+        assert att_res.status_code == status.HTTP_200_OK
+
+    # Consulta consolidada pelo próprio estudante autenticado
+    res = await lessons_client.get(
+        f"/api/v1/students/{student.id}/attendance",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert res.status_code == status.HTTP_200_OK
+    body = res.json()
+
+    # Totais consolidados: 40h ministradas, 31h presença, 9h faltas não justificadas, 4h justificadas -> 77.50% (<78%)
+    assert body["student_id"] == str(student.id)
+    assert body["student"]["full_name"] == "Lucas Andrade"
+    assert body["class_id"] == str(academic_class.id)
+    assert body["total_hours"] == 40
+    assert body["attended_hours"] == 31
+    assert body["absent_hours"] == 9
+    assert body["justified_absent_hours"] == 4
+    assert body["attendance_percentage"] == "77.50"
+    assert body["is_critical"] is True
+    assert body["is_attendance_critical"] is True
+    assert body["risk_level"] == RiskLevel.HIGH.value
+    assert body["min_required_percentage"] == "75.00"
+    assert body["max_allowed_absent_hours"] == "10.00"
+    assert body["remaining_absent_hours_margin"] == "1.00"
+    assert body["percentage_margin_to_limit"] == "2.50"
+    assert body["critical_modules_count"] == 1
+
+    # Agrupamento por disciplinas (MET-102 e USI-101 ordenadas por código)
+    assert len(body["subjects"]) == 2
+    subjects_by_code = {s["subject_code"]: s for s in body["subjects"]}
+
+    met_subj = subjects_by_code["MET-102"]
+    assert met_subj["total_hours"] == 20
+    assert met_subj["attended_hours"] == 15
+    assert met_subj["absent_hours"] == 5
+    assert met_subj["attendance_percentage"] == "75.00"
+    assert met_subj["is_critical"] is True
+    assert met_subj["risk_level"] == RiskLevel.HIGH.value
+    assert met_subj["remaining_absent_hours_margin"] == "0.00"
+    assert len(met_subj["modules"]) == 1
+
+    usi_subj = subjects_by_code["USI-101"]
+    assert usi_subj["total_hours"] == 20
+    assert usi_subj["attended_hours"] == 16
+    assert usi_subj["absent_hours"] == 4
+    assert usi_subj["justified_absent_hours"] == 4
+    assert usi_subj["attendance_percentage"] == "80.00"
+    assert usi_subj["is_critical"] is False
+    assert usi_subj["risk_level"] == RiskLevel.LOW.value
+    assert len(usi_subj["modules"]) == 2
+
+    # Verificação por módulo (incluindo divisão por zero no módulo de Fresamento -> 100.00%)
+    mod_tornearia_item = usi_subj["modules"][0]
+    assert mod_tornearia_item["module_id"] == str(mod_tornearia.id)
+    assert mod_tornearia_item["total_hours"] == 20
+    assert mod_tornearia_item["attended_hours"] == 16
+    assert mod_tornearia_item["absent_hours"] == 4
+    assert mod_tornearia_item["justified_absent_hours"] == 4
+    assert mod_tornearia_item["attendance_percentage"] == "80.00"
+    assert mod_tornearia_item["is_critical"] is False
+    assert mod_tornearia_item["max_allowed_absent_hours"] == "5.00"
+    assert mod_tornearia_item["remaining_absent_hours_margin"] == "1.00"
+    assert mod_tornearia_item["planned_max_allowed_absent_hours"] == "10.00"
+    assert mod_tornearia_item["planned_remaining_absent_hours_margin"] == "6.00"
+
+    mod_fresamento_item = usi_subj["modules"][1]
+    assert mod_fresamento_item["module_id"] == str(mod_fresamento.id)
+    assert mod_fresamento_item["total_hours"] == 0
+    assert mod_fresamento_item["attended_hours"] == 0
+    assert mod_fresamento_item["absent_hours"] == 0
+    assert mod_fresamento_item["attendance_percentage"] == "100.00"
+    assert mod_fresamento_item["is_critical"] is False
+    assert mod_fresamento_item["risk_level"] == RiskLevel.LOW.value
+    assert mod_fresamento_item["planned_max_allowed_absent_hours"] == "8.00"
+    assert mod_fresamento_item["planned_remaining_absent_hours_margin"] == "8.00"
+
+    # Histórico de faltas/atrasos/justificativas (4 registros não-PRESENT)
+    assert len(body["absence_records"]) == 4
+
+    # Filtro opcional por subject_id
+    res_filtered = await lessons_client.get(
+        f"/api/v1/students/{student.id}/attendance?subject_id={subj_usinagem.id}",
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_filtered.status_code == status.HTTP_200_OK
+    filtered_body = res_filtered.json()
+    assert len(filtered_body["subjects"]) == 1
+    assert filtered_body["subjects"][0]["subject_id"] == str(subj_usinagem.id)
+    assert filtered_body["total_hours"] == 20
+    assert filtered_body["attendance_percentage"] == "80.00"
+    assert filtered_body["is_critical"] is False
+
+
+@pytest.mark.asyncio
+async def test_student_consolidated_attendance_idor_prevention_and_contextual_rbac(
+    lessons_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida prevenção IDOR (403 entre estudantes), RBAC docente por turma e erros 401/404 (BE-023)."""
+    admin, admin_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.ADMIN,
+        suffix="idor023",
+        full_name="Admin Frequência",
+        registration_number="SENAI-ADM-0232",
+    )
+    _coordinator, coord_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.COORDINATOR,
+        suffix="idor023",
+        full_name="Coordenador Frequência",
+        registration_number="SENAI-CRD-0233",
+    )
+    assigned_teacher, assigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="alocado023",
+        full_name="Prof. Alocado",
+        registration_number="SENAI-PRF-0234",
+    )
+    _unassigned_teacher, unassigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="externo023",
+        full_name="Prof. Outra Turma",
+        registration_number="SENAI-PRF-0235",
+    )
+    student_a, student_a_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="alunoa023",
+        full_name="Aluno A",
+        registration_number="SENAI-ALU-0236",
+    )
+    student_b, _student_b_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="alunob023",
+        full_name="Aluno B",
+        registration_number="SENAI-ALU-0237",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            name="Técnico em Mecatrônica",
+            code="TEC-MEC-023",
+            description="Curso técnico",
+            total_hours=1200,
+            is_active=True,
+        )
+        class_a = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2026-1A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        class_b = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2026-1B",
+            period="2026.1",
+            shift=Shift.AFTERNOON,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="CLP-101",
+            name="Controladores Lógicos Programáveis",
+            workload_hours=60,
+            syllabus="Automação industrial",
+            is_active=True,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=assigned_teacher.id,
+                    class_id=class_a.id,
+                    subject_id=subject.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student_a.id,
+                    class_id=class_a.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=student_b.id,
+                    class_id=class_b.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+        session.commit()
+
+    # 1. Sem autenticação -> HTTP 401
+    res_unauth = await lessons_client.get(f"/api/v1/students/{student_a.id}/attendance")
+    assert res_unauth.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # 2. Prevenção IDOR: Aluno A tentando consultar Aluno B ou UUID arbitrário -> HTTP 403 Forbidden
+    res_idor_peer = await lessons_client.get(
+        f"/api/v1/students/{student_b.id}/attendance",
+        headers={"Authorization": f"Bearer {student_a_token}"},
+    )
+    assert res_idor_peer.status_code == status.HTTP_403_FORBIDDEN
+    assert res_idor_peer.json()["message"] == STUDENT_ATTENDANCE_IDOR_FORBIDDEN_MESSAGE
+
+    res_idor_random = await lessons_client.get(
+        f"/api/v1/students/{uuid4()}/attendance",
+        headers={"Authorization": f"Bearer {student_a_token}"},
+    )
+    assert res_idor_random.status_code == status.HTTP_403_FORBIDDEN
+    assert res_idor_random.json()["message"] == STUDENT_ATTENDANCE_IDOR_FORBIDDEN_MESSAGE
+
+    # 3. Aluno A consultando seus próprios dados -> HTTP 200 OK
+    res_self = await lessons_client.get(
+        f"/api/v1/students/{student_a.id}/attendance",
+        headers={"Authorization": f"Bearer {student_a_token}"},
+    )
+    assert res_self.status_code == status.HTTP_200_OK
+    assert res_self.json()["student_id"] == str(student_a.id)
+
+    # 4. Docente alocado à turma do Aluno A -> HTTP 200 OK; mas consultando Aluno B (de outra turma) -> HTTP 403
+    res_teacher_ok = await lessons_client.get(
+        f"/api/v1/students/{student_a.id}/attendance",
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert res_teacher_ok.status_code == status.HTTP_200_OK
+
+    res_teacher_other_class = await lessons_client.get(
+        f"/api/v1/students/{student_b.id}/attendance",
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert res_teacher_other_class.status_code == status.HTTP_403_FORBIDDEN
+    assert (
+        res_teacher_other_class.json()["message"]
+        == STUDENT_ATTENDANCE_TEACHER_FORBIDDEN_MESSAGE
+    )
+
+    res_unassigned_teacher = await lessons_client.get(
+        f"/api/v1/students/{student_a.id}/attendance",
+        headers={"Authorization": f"Bearer {unassigned_teacher_token}"},
+    )
+    assert res_unassigned_teacher.status_code == status.HTTP_403_FORBIDDEN
+
+    # 5. Coordenador e Admin podem consultar qualquer estudante -> HTTP 200 OK
+    for privileged_token in (coord_token, admin_token):
+        res_priv = await lessons_client.get(
+            f"/api/v1/students/{student_b.id}/attendance",
+            headers={"Authorization": f"Bearer {privileged_token}"},
+        )
+        assert res_priv.status_code == status.HTTP_200_OK
+
+    # 6. Estudante inexistente ou ID pertencente a um docente -> HTTP 404 Not Found
+    res_not_found = await lessons_client.get(
+        f"/api/v1/students/{uuid4()}/attendance",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_not_found.status_code == status.HTTP_404_NOT_FOUND
+    assert res_not_found.json()["message"] == STUDENT_NOT_FOUND_MESSAGE
+
+    res_non_student = await lessons_client.get(
+        f"/api/v1/students/{assigned_teacher.id}/attendance",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_non_student.status_code == status.HTTP_404_NOT_FOUND
+    assert res_non_student.json()["message"] == STUDENT_NOT_FOUND_MESSAGE
+
+    # 7. Filtro class_id para turma onde o estudante não está matriculado -> HTTP 404
+    res_wrong_class = await lessons_client.get(
+        f"/api/v1/students/{student_a.id}/attendance?class_id={class_b.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_wrong_class.status_code == status.HTTP_404_NOT_FOUND
+    assert res_wrong_class.json()["message"] == STUDENT_ENROLLMENT_NOT_FOUND_MESSAGE
+
 
