@@ -23,12 +23,15 @@ from app.core import (
     get_password_hasher,
 )
 from app.main import create_app
-from app.models import AcademicClass, Base, Course, Enrollment, User
+from app.models import AcademicClass, AuditLog, Base, Course, Enrollment, User
 from app.repositories.academic_class_repository import AcademicClassRepository
+from app.repositories.audit_repository import AuditRepository
 from app.repositories.auth_repository import AuthRepository
 from app.repositories.course_repository import CourseRepository
+from app.repositories.enrollment_repository import EnrollmentRepository
 from app.schemas.enums import ClassStatus, EnrollmentStatus, Shift, UserRole
 from app.schemas.user import UserProfileCreateSchema
+from app.services.audit_service import AuditService
 from app.services.enrollment_service import (
     ENROLLMENT_ALREADY_EXISTS_MESSAGE,
     ENROLLMENT_CLASS_FULL_MESSAGE,
@@ -37,6 +40,8 @@ from app.services.enrollment_service import (
     ENROLLMENT_INACTIVE_COURSE_MESSAGE,
     ENROLLMENT_INACTIVE_STUDENT_MESSAGE,
     ENROLLMENT_INVALID_STUDENT_ROLE_MESSAGE,
+    ENROLLMENT_NOT_FOUND_MESSAGE,
+    ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE,
     ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE,
 )
 
@@ -753,3 +758,311 @@ async def test_concurrent_enrollments_prevent_overbooking_and_duplicate_race_con
             or 0
         )
         assert dup_persisted_count == 1
+
+
+def test_audit_log_orm_validations_and_audit_service(
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida regras ORM de AuditLog (DB-009) e serialização JSON do AuditService."""
+    actor, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.ADMIN, suffix="aud_adm"
+    )
+
+    for bad_action in ("", " ", "A"):
+        with pytest.raises(ValueError, match="action"):
+            AuditLog(action=bad_action, entity="enrollments", entity_id="123")
+
+    for bad_entity in ("", "X"):
+        with pytest.raises(ValueError, match="entity"):
+            AuditLog(action="ENROLLMENT_STATUS_UPDATED", entity=bad_entity, entity_id="123")
+
+    with pytest.raises(ValueError, match="entity_id"):
+        AuditLog(action="ENROLLMENT_STATUS_UPDATED", entity="enrollments", entity_id="   ")
+
+    target_id = uuid4()
+    with db_session_factory() as session:
+        service = AuditService(repository=AuditRepository(session=session))
+        entry = service.log_action(
+            user_id=actor.id,
+            action="ENROLLMENT_STATUS_UPDATED",
+            entity="enrollments",
+            entity_id=target_id,
+            old_values={"status": EnrollmentStatus.ACTIVE, "grade": Decimal("7.50")},
+            new_values={"status": EnrollmentStatus.COMPLETED, "grade": Decimal("8.75")},
+            ip_address="127.0.0.1",
+            commit=True,
+        )
+        assert entry.id is not None
+        assert entry.user_id == actor.id
+        assert entry.entity_id == str(target_id)
+        assert entry.old_values == {"status": "ACTIVE", "grade": 7.5} or entry.old_values == {
+            "status": "ACTIVE",
+            "grade": "7.50",
+        }
+        assert entry.new_values["status"] == "COMPLETED"
+        assert entry.ip_address == "127.0.0.1"
+
+
+async def test_update_enrollment_status_creates_audit_log_and_updates_active_metrics(
+    enrollments_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Critérios BE-019: HTTP 200, audit_logs com old/new JSON e DROPPED fora das métricas ativas."""
+    course = _create_course_in_db(db_session_factory)
+    academic_class = _create_class_in_db(
+        db_session_factory,
+        course_id=course.id,
+        code="MEC-2026-ST",
+        max_students=2,
+        status_value=ClassStatus.ACTIVE,
+    )
+    stu_1, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="st1"
+    )
+    stu_2, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="st2"
+    )
+    stu_3, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="st3"
+    )
+    coordinator, coord_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.COORDINATOR, suffix="st_crd"
+    )
+    headers = {"Authorization": f"Bearer {coord_token}"}
+
+    res_enr_1 = await enrollments_client.post(
+        "/api/v1/enrollments",
+        json={"student_id": str(stu_1.id), "class_id": str(academic_class.id)},
+        headers=headers,
+    )
+    res_enr_2 = await enrollments_client.post(
+        "/api/v1/enrollments",
+        json={"student_id": str(stu_2.id), "class_id": str(academic_class.id)},
+        headers=headers,
+    )
+    assert res_enr_1.status_code == status.HTTP_201_CREATED
+    assert res_enr_2.status_code == status.HTTP_201_CREATED
+    enr_1_id = res_enr_1.json()["id"]
+    enr_2_id = res_enr_2.json()["id"]
+
+    # 1. Trancamento (DROPPED) com justificativa via PATCH /api/v1/enrollments/{id}/status
+    res_drop = await enrollments_client.patch(
+        f"/api/v1/enrollments/{enr_1_id}/status",
+        json={
+            "status": "DROPPED",
+            "justification": "  Trancamento   formal   protocolado na secretaria.  ",
+        },
+        headers=headers,
+    )
+    assert res_drop.status_code == status.HTTP_200_OK
+    drop_body = res_drop.json()
+    assert drop_body["id"] == enr_1_id
+    assert drop_body["status"] == "DROPPED"
+
+    # Verifica registro gerado em audit_logs com old_values e new_values em JSON
+    with db_session_factory() as session:
+        logs = list(
+            session.scalars(
+                select(AuditLog)
+                .where(
+                    AuditLog.entity == "enrollments",
+                    AuditLog.entity_id == enr_1_id,
+                )
+                .order_by(AuditLog.created_at.asc())
+            ).all()
+        )
+        assert len(logs) == 1
+        audit = logs[0]
+        assert audit.user_id == coordinator.id
+        assert audit.action == "ENROLLMENT_STATUS_UPDATED"
+        assert audit.old_values == {
+            "status": "ACTIVE",
+            "student_id": str(stu_1.id),
+            "class_id": str(academic_class.id),
+        }
+        assert audit.new_values == {
+            "status": "DROPPED",
+            "student_id": str(stu_1.id),
+            "class_id": str(academic_class.id),
+            "justification": "Trancamento formal protocolado na secretaria.",
+        }
+
+        # Alunos DROPPED deixam de integrar a lista elegível para chamada e cálculos de faltas futuras
+        eligible = EnrollmentRepository(session=session).list_eligible_for_attendance(
+            academic_class.id
+        )
+        assert [item.student_id for item in eligible] == [stu_2.id]
+
+    # Métricas da turma refletem apenas alunos ativos (1 ativo, 1 vaga liberada)
+    res_class = await enrollments_client.get(
+        f"/api/v1/classes/{academic_class.id}",
+        headers=headers,
+    )
+    assert res_class.status_code == status.HTTP_200_OK
+    assert res_class.json()["enrolled_students_count"] == 1
+    assert res_class.json()["available_slots"] == 1
+
+    # Nova matrícula na vaga liberada ocupa novamente o limite max_students=2
+    res_enr_3 = await enrollments_client.post(
+        "/api/v1/enrollments",
+        json={"student_id": str(stu_3.id), "class_id": str(academic_class.id)},
+        headers=headers,
+    )
+    assert res_enr_3.status_code == status.HTTP_201_CREATED
+
+    # Tentar reativar aluno DROPPED para turma já lotada retorna HTTP 422
+    res_reactivate_full = await enrollments_client.patch(
+        f"/api/v1/enrollments/{enr_1_id}/status",
+        json={"status": "ACTIVE", "justification": "Tentativa de retorno sem vaga."},
+        headers=headers,
+    )
+    assert res_reactivate_full.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert res_reactivate_full.json()["message"] == ENROLLMENT_CLASS_FULL_MESSAGE
+
+    # Transições para SUSPENDED e COMPLETED também registram auditoria
+    res_suspend = await enrollments_client.patch(
+        f"/api/v1/enrollments/{enr_2_id}/status",
+        json={"status": "SUSPENDED"},
+        headers=headers,
+    )
+    assert res_suspend.status_code == status.HTTP_200_OK
+    assert res_suspend.json()["status"] == "SUSPENDED"
+
+    res_complete = await enrollments_client.patch(
+        f"/api/v1/enrollments/{res_enr_3.json()['id']}/status",
+        json={"status": "COMPLETED", "justification": "Aproveitamento integral concluído."},
+        headers=headers,
+    )
+    assert res_complete.status_code == status.HTTP_200_OK
+    assert res_complete.json()["status"] == "COMPLETED"
+
+
+async def test_update_enrollment_status_rbac_and_error_cases(
+    enrollments_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Garante RBAC (401/403 apenas ADMIN/COORDINATOR) e validação de erros (400/404/422)."""
+    course = _create_course_in_db(db_session_factory)
+    academic_class = _create_class_in_db(
+        db_session_factory, course_id=course.id, code="MEC-2026-RB", status_value=ClassStatus.ACTIVE
+    )
+    student, student_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.STUDENT, suffix="rbs"
+    )
+    _, teacher_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="rbt"
+    )
+    admin, admin_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.ADMIN, suffix="rba"
+    )
+    _, coord_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.COORDINATOR, suffix="rbc"
+    )
+
+    res_create = await enrollments_client.post(
+        "/api/v1/enrollments",
+        json={"student_id": str(student.id), "class_id": str(academic_class.id)},
+        headers={"Authorization": f"Bearer {coord_token}"},
+    )
+    assert res_create.status_code == status.HTTP_201_CREATED
+    enrollment_id = res_create.json()["id"]
+
+    # Sem token -> 401
+    res_unauth = await enrollments_client.patch(
+        f"/api/v1/enrollments/{enrollment_id}/status",
+        json={"status": "DROPPED"},
+    )
+    assert res_unauth.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # STUDENT e TEACHER -> 403
+    for forbidden_token in (student_token, teacher_token):
+        res_forbidden = await enrollments_client.patch(
+            f"/api/v1/enrollments/{enrollment_id}/status",
+            json={"status": "DROPPED"},
+            headers={"Authorization": f"Bearer {forbidden_token}"},
+        )
+        assert res_forbidden.status_code == status.HTTP_403_FORBIDDEN
+        assert res_forbidden.json()["message"] == "Acesso não autorizado para seu perfil"
+
+    # Matrícula inexistente -> 404
+    res_404 = await enrollments_client.patch(
+        f"/api/v1/enrollments/{uuid4()}/status",
+        json={"status": "DROPPED"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_404.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404.json()["message"] == ENROLLMENT_NOT_FOUND_MESSAGE
+
+    # UUID inválido, status inválido, XSS/HTML na justificativa e campo extra -> 400
+    assert (
+        await enrollments_client.patch(
+            "/api/v1/enrollments/id-invalido/status",
+            json={"status": "DROPPED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    ).status_code == status.HTTP_400_BAD_REQUEST
+
+    assert (
+        await enrollments_client.patch(
+            f"/api/v1/enrollments/{enrollment_id}/status",
+            json={"status": "CANCELADO"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    ).status_code == status.HTTP_400_BAD_REQUEST
+
+    assert (
+        await enrollments_client.patch(
+            f"/api/v1/enrollments/{enrollment_id}/status",
+            json={"status": "DROPPED", "justification": "<script>alert(1)</script>"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    ).status_code == status.HTTP_400_BAD_REQUEST
+
+    assert (
+        await enrollments_client.patch(
+            f"/api/v1/enrollments/{enrollment_id}/status",
+            json={"status": "DROPPED", "unexpected": "value"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    ).status_code == status.HTTP_400_BAD_REQUEST
+
+    # ADMIN consegue atualizar status (200) e reativar se turma está ativa e há vaga
+    res_admin_drop = await enrollments_client.patch(
+        f"/api/v1/enrollments/{enrollment_id}/status",
+        json={"status": "DROPPED"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_admin_drop.status_code == status.HTTP_200_OK
+
+    # Arquiva a turma e valida bloqueio de reativação de matrícula (422)
+    with db_session_factory() as session:
+        cls_obj = session.get(AcademicClass, academic_class.id)
+        assert cls_obj is not None
+        cls_obj.status = ClassStatus.ARCHIVED
+        session.commit()
+
+    res_reactivate_archived = await enrollments_client.patch(
+        f"/api/v1/enrollments/{enrollment_id}/status",
+        json={"status": "ACTIVE"},
+        headers={"Authorization": f"Bearer {coord_token}"},
+    )
+    assert res_reactivate_archived.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert (
+        res_reactivate_archived.json()["message"]
+        == ENROLLMENT_REACTIVATION_INACTIVE_CLASS_MESSAGE
+    )
+
+    with db_session_factory() as session:
+        audits = list(
+            session.scalars(
+                select(AuditLog).where(
+                    AuditLog.entity_id == enrollment_id,
+                    AuditLog.user_id == admin.id,
+                )
+            ).all()
+        )
+        assert len(audits) == 1
+
