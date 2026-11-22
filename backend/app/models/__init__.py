@@ -17,7 +17,13 @@ from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
-from app.models.practical_task import PracticalTask, TaskCriterion, TaskSubmission
+from app.models.practical_task import (
+    PracticalTask,
+    SkillEvidence,
+    SubmissionEvaluation,
+    TaskCriterion,
+    TaskSubmission,
+)
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User, UserProfile
@@ -35,7 +41,9 @@ __all__ = [
     "LearningModule",
     "ModuleCompetency",
     "PracticalTask",
+    "SkillEvidence",
     "Subject",
+    "SubmissionEvaluation",
     "TaskCriterion",
     "TaskSubmission",
     "TeacherAssignment",

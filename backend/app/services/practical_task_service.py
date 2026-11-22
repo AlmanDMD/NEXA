@@ -1,17 +1,19 @@
 """Serviço de domínio para Atividades Práticas de Oficina e Critérios de Tolerância (BE-024)."""
 
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Final
 from uuid import UUID
 
 from fastapi import Depends
 
 from app.core.exceptions import (
+    BadRequestException,
     ForbiddenException,
     NotFoundException,
     UnprocessableEntityException,
 )
 from app.core.logging import logger
-from app.models.practical_task import PracticalTask
+from app.models.practical_task import PracticalTask, TaskCriterion
 from app.models.user import User
 from app.repositories.practical_task_repository import (
     PracticalTaskRepository,
@@ -19,16 +21,21 @@ from app.repositories.practical_task_repository import (
 )
 from app.schemas.class_lesson import LessonModuleSummarySchema
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import ClassStatus, SubmissionStatus, UserRole
+from app.schemas.enums import ClassStatus, EnrollmentStatus, SubmissionStatus, UserRole
 from app.schemas.practical_task import (
     PracticalTaskCreateSchema,
     PracticalTaskListQueryParams,
     PracticalTaskPaginatedResponseSchema,
     PracticalTaskResponseSchema,
+    SkillEvidenceResponseSchema,
+    SubmissionCriterionEvaluationResponseSchema,
     TaskCriterionCompetencySummarySchema,
     TaskCriterionResponseSchema,
+    TaskEvaluationRequestSchema,
+    TaskEvaluationResponseSchema,
 )
 
+PRACTICAL_TASK_NOT_FOUND_MESSAGE: Final[str] = "Atividade prática não encontrada."
 PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE: Final[str] = (
     "Módulo de aprendizagem prática não encontrado."
 )
@@ -51,6 +58,20 @@ PRACTICAL_TASK_INACTIVE_SUBJECT_MESSAGE: Final[str] = (
 PRACTICAL_TASK_MODULE_COURSE_MISMATCH_MESSAGE: Final[str] = (
     "O módulo prático informado não pertence ao curso técnico da turma selecionada."
 )
+TASK_EVALUATION_STUDENT_NOT_ENROLLED_MESSAGE: Final[str] = (
+    "Estudante informado não está matriculado na turma desta atividade prática."
+)
+TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE: Final[str] = (
+    "Não é possível registrar avaliação prática para matrícula inativa ou trancada (DROPPED)."
+)
+TASK_EVALUATION_INVALID_CRITERION_MESSAGE: Final[str] = (
+    "Um ou mais critérios informados não pertencem a esta atividade prática."
+)
+TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE: Final[str] = (
+    "Todos os critérios técnicos (rubricas) da atividade prática devem ser avaliados."
+)
+_DECIMAL_QUANTIZER: Final[Decimal] = Decimal("0.01")
+_MAX_RUBRIC_LEVEL: Final[Decimal] = Decimal("5")
 
 
 class PracticalTaskService:
@@ -226,6 +247,190 @@ class PracticalTaskService:
             limit=params.limit,
         )
 
+    def evaluate_practical_task(
+        self,
+        task_id: UUID,
+        payload: TaskEvaluationRequestSchema,
+        *,
+        current_user: User,
+    ) -> TaskEvaluationResponseSchema:
+        """Avalia entrega prática por rubricas no servidor, atualiza task_submissions e grava skill_evidences (BE-025)."""
+        task = self._repository.get_by_id(task_id)
+        if task is None:
+            raise NotFoundException(message=PRACTICAL_TASK_NOT_FOUND_MESSAGE)
+
+        if (
+            current_user.role == UserRole.TEACHER
+            and not self._repository.is_teacher_assigned_to_class_and_subject(
+                teacher_id=current_user.id,
+                class_id=task.class_id,
+                subject_id=task.module.subject_id,
+            )
+        ):
+            raise ForbiddenException(message=PRACTICAL_TASK_TEACHER_FORBIDDEN_MESSAGE)
+
+        if task.academic_class.status != ClassStatus.ACTIVE:
+            raise UnprocessableEntityException(message=PRACTICAL_TASK_INACTIVE_CLASS_MESSAGE)
+
+        enrollment = self._repository.get_enrollment_by_class_and_student(
+            class_id=task.class_id,
+            student_id=payload.student_id,
+        )
+        if enrollment is None:
+            raise BadRequestException(message=TASK_EVALUATION_STUDENT_NOT_ENROLLED_MESSAGE)
+
+        if enrollment.status != EnrollmentStatus.ACTIVE:
+            raise BadRequestException(message=TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE)
+
+        task_criteria_by_id: dict[UUID, TaskCriterion] = {
+            criterion.id: criterion for criterion in task.criteria
+        }
+        for item in payload.evaluations:
+            if item.criterion_id not in task_criteria_by_id:
+                raise BadRequestException(message=TASK_EVALUATION_INVALID_CRITERION_MESSAGE)
+
+        if len(payload.evaluations) != len(task_criteria_by_id):
+            raise BadRequestException(message=TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE)
+
+        criterion_evaluations: list[tuple[TaskCriterion, int, Decimal, str | None]] = []
+        weighted_level_sum = Decimal("0.00")
+        total_weight_sum = Decimal("0.00")
+        competency_weighted_sums: dict[UUID, list[Decimal]] = {}
+
+        for item in payload.evaluations:
+            criterion = task_criteria_by_id[item.criterion_id]
+            level_dec = Decimal(item.achieved_level)
+            weight_dec = Decimal(criterion.weight)
+            score_awarded = (
+                (level_dec / _MAX_RUBRIC_LEVEL) * Decimal(task.max_score)
+            ).quantize(_DECIMAL_QUANTIZER, rounding=ROUND_HALF_UP)
+
+            weighted_level_sum += level_dec * weight_dec
+            total_weight_sum += weight_dec
+
+            comp_bucket = competency_weighted_sums.setdefault(
+                criterion.competency_id,
+                [Decimal("0.00"), Decimal("0.00")],
+            )
+            comp_bucket[0] += level_dec * weight_dec
+            comp_bucket[1] += weight_dec
+
+            criterion_evaluations.append(
+                (
+                    criterion,
+                    item.achieved_level,
+                    score_awarded,
+                    item.technical_feedback,
+                )
+            )
+
+        if total_weight_sum <= Decimal("0.00"):
+            final_task_score = Decimal("0.00")
+        else:
+            final_task_score = (
+                (weighted_level_sum / (_MAX_RUBRIC_LEVEL * total_weight_sum))
+                * Decimal(task.max_score)
+            ).quantize(_DECIMAL_QUANTIZER, rounding=ROUND_HALF_UP)
+
+        competency_verified_levels: list[tuple[UUID, Decimal]] = []
+        for comp_id, (comp_weighted_level, comp_weight_total) in competency_weighted_sums.items():
+            verified_level = (comp_weighted_level / comp_weight_total).quantize(
+                _DECIMAL_QUANTIZER,
+                rounding=ROUND_HALF_UP,
+            )
+            verified_level = min(
+                Decimal("5.00"),
+                max(Decimal("1.00"), verified_level),
+            )
+            competency_verified_levels.append((comp_id, verified_level))
+
+        submission = self._repository.evaluate_task_submission_with_evidences(
+            task=task,
+            enrollment=enrollment,
+            evaluator_id=current_user.id,
+            final_task_score=final_task_score,
+            criterion_evaluations=criterion_evaluations,
+            competency_verified_levels=competency_verified_levels,
+            evidence_url=payload.evidence_url,
+            student_notes=payload.student_notes,
+        )
+
+        evaluations_response = [
+            SubmissionCriterionEvaluationResponseSchema(
+                id=ev.id,
+                submission_id=ev.submission_id,
+                criterion_id=ev.criterion_id,
+                criterion_name=ev.criterion.criterion_name,
+                competency_id=ev.criterion.competency_id,
+                competency_code=ev.criterion.competency.code,
+                competency_title=ev.criterion.competency.title,
+                weight=ev.criterion.weight,
+                min_acceptable_level=ev.criterion.min_acceptable_level,
+                achieved_level=ev.achieved_level,
+                meets_min_acceptable_level=(
+                    ev.achieved_level >= ev.criterion.min_acceptable_level
+                ),
+                score_awarded=ev.score_awarded,
+                technical_feedback=ev.technical_feedback,
+                evaluated_at=ev.evaluated_at,
+            )
+            for ev in submission.evaluations
+        ]
+
+        evidences_response = [
+            SkillEvidenceResponseSchema(
+                id=se.id,
+                student_id=se.student_id,
+                competency_id=se.competency_id,
+                competency_code=se.competency.code,
+                competency_title=se.competency.title,
+                source_submission_id=se.source_submission_id,
+                verified_level=se.verified_level,
+                verified_by=se.verified_by,
+                recorded_at=se.recorded_at,
+            )
+            for se in submission.skill_evidences
+        ]
+
+        evaluated_at = (
+            evaluations_response[0].evaluated_at
+            if evaluations_response
+            else submission.updated_at
+        )
+        passing_score = Decimal(task.module.passing_score).quantize(_DECIMAL_QUANTIZER)
+        is_approved = final_task_score >= passing_score
+
+        logger.bind(
+            task_id=str(task.id),
+            submission_id=str(submission.id),
+            student_id=str(enrollment.student_id),
+            evaluator_id=str(current_user.id),
+            final_task_score=str(final_task_score),
+            is_approved=is_approved,
+            evidences_count=len(evidences_response),
+        ).info("Avaliação prática por rubricas registrada com nota ponderada e evidências de habilidade.")
+
+        return TaskEvaluationResponseSchema(
+            submission_id=submission.id,
+            task_id=task.id,
+            module_id=task.module_id,
+            class_id=task.class_id,
+            student_id=enrollment.student_id,
+            enrollment_id=enrollment.id,
+            evaluator_id=current_user.id,
+            status=submission.status,
+            max_score=task.max_score,
+            final_task_score=final_task_score,
+            passing_score=passing_score,
+            is_approved=is_approved,
+            evidence_url=submission.evidence_url,
+            student_notes=submission.student_notes,
+            completed_at=submission.completed_at or evaluated_at,
+            evaluated_at=evaluated_at,
+            evaluations=evaluations_response,
+            skill_evidences=evidences_response,
+        )
+
 
 def get_practical_task_service(
     repository: PracticalTaskRepositoryDep,
@@ -247,8 +452,13 @@ __all__ = [
     "PRACTICAL_TASK_MODULE_COURSE_MISMATCH_MESSAGE",
     "PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE",
     "PRACTICAL_TASK_MODULE_TEACHER_FORBIDDEN_MESSAGE",
+    "PRACTICAL_TASK_NOT_FOUND_MESSAGE",
     "PRACTICAL_TASK_TEACHER_FORBIDDEN_MESSAGE",
     "PracticalTaskService",
     "PracticalTaskServiceDep",
+    "TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE",
+    "TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE",
+    "TASK_EVALUATION_INVALID_CRITERION_MESSAGE",
+    "TASK_EVALUATION_STUDENT_NOT_ENROLLED_MESSAGE",
     "get_practical_task_service",
 ]

@@ -19,7 +19,7 @@ from app.schemas.competency import (
     validate_required_level_pt,
 )
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import CompetencyCategory
+from app.schemas.enums import CompetencyCategory, SubmissionStatus
 from app.schemas.learning_module import _parse_decimal_two_places
 from app.schemas.validators import sanitize_optional_text, sanitize_text
 
@@ -405,8 +405,217 @@ class PracticalTaskPaginatedResponseSchema(BaseResponseSchema):
 type PracticalTaskListParamsDep = Annotated[PracticalTaskListQueryParams, Query()]
 
 
+def validate_technical_feedback_pt(value: Any) -> str | None:
+    """Sanitiza o feedback técnico opcional por rubrica limitando a 1000 caracteres."""
+    cleaned = sanitize_optional_text(value, collapse_spaces=True)
+    if cleaned is None:
+        return None
+    if len(cleaned) > 1000:
+        raise PydanticCustomError(
+            "technical_feedback_too_long",
+            "O feedback técnico (technical_feedback) deve ter no máximo 1000 caracteres.",
+        )
+    return cleaned
+
+
+type OptionalTechnicalFeedbackStr = Annotated[
+    str | None,
+    BeforeValidator(validate_technical_feedback_pt),
+    Field(
+        description="Feedback técnico opcional do docente sobre o critério avaliado (até 1000 caracteres)",
+        examples=["Acabamento superficial dentro da tolerância, atenção ao avanço no passe final."],
+    ),
+]
+
+
+class CriterionEvaluationInputSchema(StrictRequestSchema):
+    """Avaliação individual de uma rubrica/critério técnico pelo docente (BE-025)."""
+
+    criterion_id: UUID = Field(
+        description="Identificador UUID do critério técnico da atividade prática (task_criteria)",
+    )
+    achieved_level: RequiredLevelInt = Field(
+        description="Nível de domínio demonstrado pelo estudante na bancada (escala inteira de 1 a 5)",
+        examples=[4],
+    )
+    technical_feedback: OptionalTechnicalFeedbackStr = None
+
+    @field_validator("achieved_level", mode="before")
+    @classmethod
+    def validate_achieved_level(cls, value: Any) -> int:
+        return validate_required_level_pt(value)
+
+
+class TaskEvaluationRequestSchema(StrictRequestSchema):
+    """Payload de avaliação e registro de conclusão de atividade prática pelo docente (POST /api/v1/tasks/{id}/evaluations)."""
+
+    student_id: UUID = Field(
+        description="Identificador UUID do estudante matriculado na turma da atividade prática",
+    )
+    status: SubmissionStatus = Field(
+        default=SubmissionStatus.EVALUATED,
+        description="Status da entrega prática após avaliação docente (deve ser EVALUATED)",
+        examples=[SubmissionStatus.EVALUATED],
+    )
+    evaluations: list[CriterionEvaluationInputSchema] = Field(
+        min_length=1,
+        max_length=50,
+        validation_alias=AliasChoices(
+            "evaluations",
+            "criteria_evaluations",
+            "rubric_evaluations",
+            "criteria",
+        ),
+        description="Lista de avaliações atribuídas pelo docente para cada critério técnico da tarefa",
+    )
+    evidence_url: OptionalBlueprintUrlStr = None
+    student_notes: str | None = Field(
+        default=None,
+        description="Observações complementares opcionais sobre a entrega prática",
+    )
+
+    @field_validator("student_notes", mode="before")
+    @classmethod
+    def sanitize_student_notes(cls, value: Any) -> str | None:
+        return sanitize_optional_text(value, collapse_spaces=False)
+
+    @model_validator(mode="after")
+    def validate_evaluation_status_and_unique_criteria(self) -> Self:
+        """Exige status EVALUATED e impede envio de criterion_id duplicado na mesma avaliação."""
+        if self.status != SubmissionStatus.EVALUATED:
+            raise PydanticCustomError(
+                "invalid_task_evaluation_status",
+                "O status de conclusão/avaliação pelo docente deve ser EVALUATED.",
+            )
+        seen: set[UUID] = set()
+        for item in self.evaluations:
+            if item.criterion_id in seen:
+                raise PydanticCustomError(
+                    "duplicate_criterion_evaluation",
+                    "A avaliação contém criterion_id duplicado no mesmo envio.",
+                )
+            seen.add(item.criterion_id)
+        return self
+
+
+class SubmissionCriterionEvaluationResponseSchema(BaseResponseSchema):
+    """Detalhamento da avaliação gravada para uma rubrica em submission_evaluations (DB-026)."""
+
+    id: UUID = Field(description="Identificador UUID do registro em submission_evaluations")
+    submission_id: UUID = Field(description="Identificador UUID da submissão (task_submissions)")
+    criterion_id: UUID = Field(description="Identificador UUID do critério técnico (task_criteria)")
+    criterion_name: str = Field(description="Nome do critério técnico avaliado")
+    competency_id: UUID = Field(description="Identificador UUID da competência associada")
+    competency_code: str = Field(description="Código institucional da competência")
+    competency_title: str = Field(description="Título da competência técnica")
+    weight: Decimal = Field(description="Peso ponderado do critério na atividade prática")
+    min_acceptable_level: int = Field(
+        ge=1,
+        le=5,
+        description="Nível mínimo aceitável configurado na rubrica (1 a 5)",
+    )
+    achieved_level: int = Field(
+        ge=1,
+        le=5,
+        description="Nível de domínio alcançado pelo estudante (1 a 5)",
+    )
+    meets_min_acceptable_level: bool = Field(
+        description="Indica se achieved_level atingiu ou superou min_acceptable_level",
+    )
+    score_awarded: Decimal = Field(
+        description="Nota proporcional calculada no servidor para este critério (0.00 a max_score)",
+    )
+    technical_feedback: str | None = Field(
+        default=None,
+        description="Feedback técnico registrado pelo docente",
+    )
+    evaluated_at: datetime = Field(description="Data/hora da avaliação do critério")
+
+    @field_validator("weight", "score_awarded", mode="after")
+    @classmethod
+    def quantize_decimals(cls, value: Decimal) -> Decimal:
+        """Padroniza valores decimais com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class SkillEvidenceResponseSchema(BaseResponseSchema):
+    """Evidência prática gerada automaticamente em skill_evidences (DB-033) para o motor de diagnóstico."""
+
+    id: UUID = Field(description="Identificador UUID da evidência em skill_evidences")
+    student_id: UUID = Field(description="Identificador UUID do estudante avaliado")
+    competency_id: UUID = Field(description="Identificador UUID da competência técnica")
+    competency_code: str = Field(description="Código institucional da competência")
+    competency_title: str = Field(description="Título da competência técnica")
+    source_submission_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da submissão prática que originou a evidência",
+    )
+    verified_level: Decimal = Field(
+        description="Nível de domínio verificado pelo docente na escala de 1.00 a 5.00",
+    )
+    verified_by: UUID = Field(description="Identificador UUID do docente avaliador")
+    recorded_at: datetime = Field(description="Data/hora de registro da evidência prática")
+
+    @field_validator("verified_level", mode="after")
+    @classmethod
+    def quantize_verified_level(cls, value: Decimal) -> Decimal:
+        """Padroniza verified_level com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class TaskEvaluationResponseSchema(BaseResponseSchema):
+    """Resposta consolidada da avaliação prática por rubricas com nota ponderada e evidências (BE-025)."""
+
+    submission_id: UUID = Field(description="Identificador UUID da submissão avaliada")
+    task_id: UUID = Field(description="Identificador UUID da atividade prática")
+    module_id: UUID = Field(description="Identificador UUID do módulo prático")
+    class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
+    student_id: UUID = Field(description="Identificador UUID do estudante avaliado")
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula do estudante")
+    evaluator_id: UUID = Field(description="Identificador UUID do docente avaliador")
+    status: SubmissionStatus = Field(
+        description="Status atualizado da entrega prática (EVALUATED)",
+    )
+    max_score: Decimal = Field(description="Pontuação máxima da atividade prática")
+    final_task_score: Decimal = Field(
+        description="Nota final ponderada calculada no servidor Python a partir dos pesos de task_criteria",
+    )
+    passing_score: Decimal = Field(
+        description="Nota de corte do módulo prático para referência pedagógica",
+    )
+    is_approved: bool = Field(
+        description="Indica se final_task_score atingiu ou superou a nota de corte do módulo",
+    )
+    evidence_url: str | None = Field(
+        default=None,
+        description="URL opcional da evidência/desenho da entrega",
+    )
+    student_notes: str | None = Field(
+        default=None,
+        description="Observações opcionais da entrega",
+    )
+    completed_at: datetime = Field(description="Data/hora de conclusão da entrega prática")
+    evaluated_at: datetime = Field(description="Data/hora da avaliação pelo docente")
+    evaluations: list[SubmissionCriterionEvaluationResponseSchema] = Field(
+        default_factory=list,
+        description="Lista das avaliações por rubrica persistidas em submission_evaluations",
+    )
+    skill_evidences: list[SkillEvidenceResponseSchema] = Field(
+        default_factory=list,
+        description="Lista das evidências de competência geradas em skill_evidences (DB-033)",
+    )
+
+    @field_validator("max_score", "final_task_score", "passing_score", mode="after")
+    @classmethod
+    def quantize_scores(cls, value: Decimal) -> Decimal:
+        """Padroniza notas com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
 __all__ = [
+    "CriterionEvaluationInputSchema",
     "OptionalBlueprintUrlStr",
+    "OptionalTechnicalFeedbackStr",
     "PracticalTaskCreateSchema",
     "PracticalTaskDueDate",
     "PracticalTaskListParamsDep",
@@ -415,13 +624,18 @@ __all__ = [
     "PracticalTaskPaginatedResponseSchema",
     "PracticalTaskResponseSchema",
     "PracticalTaskTitleStr",
+    "SkillEvidenceResponseSchema",
+    "SubmissionCriterionEvaluationResponseSchema",
     "TaskCriterionCompetencySummarySchema",
     "TaskCriterionCreateItemSchema",
     "TaskCriterionNameStr",
     "TaskCriterionResponseSchema",
+    "TaskEvaluationRequestSchema",
+    "TaskEvaluationResponseSchema",
     "validate_blueprint_url_pt",
     "validate_practical_task_due_date_pt",
     "validate_practical_task_max_score_pt",
     "validate_practical_task_title_pt",
     "validate_task_criterion_name_pt",
+    "validate_technical_feedback_pt",
 ]

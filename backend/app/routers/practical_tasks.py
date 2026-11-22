@@ -13,6 +13,8 @@ from app.schemas.practical_task import (
     PracticalTaskListParamsDep,
     PracticalTaskPaginatedResponseSchema,
     PracticalTaskResponseSchema,
+    TaskEvaluationRequestSchema,
+    TaskEvaluationResponseSchema,
 )
 from app.services.practical_task_service import PracticalTaskServiceDep
 
@@ -59,6 +61,35 @@ async def list_module_practical_tasks(
     return task_service.list_module_practical_tasks(
         module_id,
         params,
+        current_user=current_user,
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/evaluations",
+    response_model=TaskEvaluationResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Registrar conclusão e avaliação por rubricas de atividade prática pelo docente",
+)
+@router.post(
+    "/practical-tasks/{task_id}/evaluations",
+    response_model=TaskEvaluationResponseSchema,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def evaluate_practical_task(
+    task_id: UUIDPathParam,
+    payload: TaskEvaluationRequestSchema,
+    task_service: PracticalTaskServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> TaskEvaluationResponseSchema:
+    """Calcula a nota ponderada a partir das rubricas, atualiza task_submissions e grava skill_evidences."""
+    return task_service.evaluate_practical_task(
+        task_id,
+        payload,
         current_user=current_user,
     )
 

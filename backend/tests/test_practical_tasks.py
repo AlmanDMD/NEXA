@@ -32,7 +32,9 @@ from app.models import (
     LearningModule,
     ModuleCompetency,
     PracticalTask,
+    SkillEvidence,
     Subject,
+    SubmissionEvaluation,
     TaskCriterion,
     TaskSubmission,
     TeacherAssignment,
@@ -69,7 +71,12 @@ from app.services.practical_task_service import (
     PRACTICAL_TASK_MODULE_COURSE_MISMATCH_MESSAGE,
     PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE,
     PRACTICAL_TASK_MODULE_TEACHER_FORBIDDEN_MESSAGE,
+    PRACTICAL_TASK_NOT_FOUND_MESSAGE,
     PRACTICAL_TASK_TEACHER_FORBIDDEN_MESSAGE,
+    TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE,
+    TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE,
+    TASK_EVALUATION_INVALID_CRITERION_MESSAGE,
+    TASK_EVALUATION_STUDENT_NOT_ENROLLED_MESSAGE,
 )
 
 
@@ -809,3 +816,470 @@ async def test_list_module_practical_tasks_filters_rbac_and_domain_errors(
     assert search_res.status_code == status.HTTP_200_OK
     assert search_res.json()["total"] == 1
     assert search_res.json()["data"][0]["title"] == "Tarefa 02 - Relógio Comparador"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_practical_task_weighted_score_and_skill_evidences(
+    tasks_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida POST /api/v1/tasks/{id}/evaluations: nota ponderada no servidor, task_submissions e skill_evidences (BE-025)."""
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="eval025",
+        full_name="Instrutor Avaliador",
+        registration_number="SENAI-PRF-0250",
+    )
+    student, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stueval025",
+        full_name="Gabriel Rocha",
+        registration_number="SENAI-ALU-0251",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-USI-025",
+            name="Técnico em Usinagem CNC",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="CNC-2026-1M",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-025",
+            name="Tornearia de Precisão",
+            workload_hours=80,
+            syllabus="Torneamento e controle dimensional",
+            is_active=True,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Usinagem de Eixos e Buchas",
+            order_index=1,
+            practical_hours=40,
+            description="Bancada de tornearia",
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp_dim = CompetencyRepository(session).create(
+            code="COMP-DIM-025",
+            title="Tolerância Dimensional ISO H7",
+            category=CompetencyCategory.TECHNICAL,
+            description="Controle com micrômetro externo",
+        )
+        comp_acab = CompetencyRepository(session).create(
+            code="COMP-ACAB-025",
+            title="Acabamento Superficial e Rugosidade",
+            category=CompetencyCategory.PROCEDURAL,
+            description="Acabamento Ra 1,6",
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subject.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+        session.commit()
+
+    create_res = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(module.id),
+            "class_id": str(academic_class.id),
+            "title": "Eixo Escalonado com Rosca M16",
+            "due_date": "2026-04-30T18:00:00Z",
+            "max_score": "10.00",
+            "is_mandatory": True,
+            "criteria": [
+                {
+                    "competency_id": str(comp_dim.id),
+                    "criterion_name": "Tolerância Dimensional ±0,02mm",
+                    "weight": "2.00",
+                    "min_acceptable_level": 4,
+                },
+                {
+                    "competency_id": str(comp_acab.id),
+                    "criterion_name": "Rugosidade e Acabamento Superficial",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert create_res.status_code == status.HTTP_201_CREATED
+    created_task = create_res.json()
+    task_id = UUID(created_task["id"])
+    criteria_by_comp = {
+        c["competency_id"]: UUID(c["id"]) for c in created_task["criteria"]
+    }
+    crit_dim_id = criteria_by_comp[str(comp_dim.id)]
+    crit_acab_id = criteria_by_comp[str(comp_acab.id)]
+
+    # 1. Avaliação pelo docente:
+    # Critério 1 (peso 2.00): achieved_level=5 -> score_awarded=10.00
+    # Critério 2 (peso 1.00): achieved_level=2 -> score_awarded=4.00
+    # Nota final ponderada no servidor: (10.00*2 + 4.00*1) / 3 = 8.00
+    eval_res = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={
+            "student_id": str(student.id),
+            "status": "EVALUATED",
+            "evidence_url": "https://cdn.senai.br/evidences/peca-gabriel.jpg",
+            "evaluations": [
+                {
+                    "criterion_id": str(crit_dim_id),
+                    "achieved_level": 5,
+                    "technical_feedback": "Medida exata de 25,00mm no micrômetro.",
+                },
+                {
+                    "criterion_id": str(crit_acab_id),
+                    "achieved_level": 2,
+                    "technical_feedback": "Vibrado leve no passe de acabamento.",
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert eval_res.status_code == status.HTTP_200_OK
+    eval_body = eval_res.json()
+
+    assert eval_body["task_id"] == str(task_id)
+    assert eval_body["student_id"] == str(student.id)
+    assert eval_body["evaluator_id"] == str(teacher.id)
+    assert eval_body["status"] == SubmissionStatus.EVALUATED.value
+    assert eval_body["max_score"] == "10.00"
+    assert eval_body["final_task_score"] == "8.00"
+    assert eval_body["passing_score"] == "6.00"
+    assert eval_body["is_approved"] is True
+    assert len(eval_body["evaluations"]) == 2
+    assert len(eval_body["skill_evidences"]) == 2
+
+    evals_by_crit = {e["criterion_id"]: e for e in eval_body["evaluations"]}
+    assert evals_by_crit[str(crit_dim_id)]["score_awarded"] == "10.00"
+    assert evals_by_crit[str(crit_dim_id)]["meets_min_acceptable_level"] is True
+    assert evals_by_crit[str(crit_acab_id)]["score_awarded"] == "4.00"
+    assert evals_by_crit[str(crit_acab_id)]["meets_min_acceptable_level"] is False
+
+    evidences_by_comp = {se["competency_id"]: se for se in eval_body["skill_evidences"]}
+    assert evidences_by_comp[str(comp_dim.id)]["verified_level"] == "5.00"
+    assert evidences_by_comp[str(comp_dim.id)]["verified_by"] == str(teacher.id)
+    assert evidences_by_comp[str(comp_acab.id)]["verified_level"] == "2.00"
+
+    # 2. Reavaliação idempotente (upsert sem duplicar submission_evaluations ou skill_evidences)
+    reeval_res = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={
+            "student_id": str(student.id),
+            "status": "EVALUATED",
+            "evaluations": [
+                {
+                    "criterion_id": str(crit_dim_id),
+                    "achieved_level": 5,
+                    "technical_feedback": "Mantido nível 5.",
+                },
+                {
+                    "criterion_id": str(crit_acab_id),
+                    "achieved_level": 5,
+                    "technical_feedback": "Retrabalho concluído com ótimo acabamento.",
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert reeval_res.status_code == status.HTTP_200_OK
+    assert reeval_res.json()["final_task_score"] == "10.00"
+
+    with db_session_factory() as session:
+        sub_row = session.scalar(
+            select(TaskSubmission).where(
+                TaskSubmission.task_id == task_id,
+                TaskSubmission.student_id == student.id,
+            )
+        )
+        assert sub_row is not None
+        assert sub_row.status == SubmissionStatus.EVALUATED
+        assert sub_row.final_task_score == Decimal("10.00")
+
+        eval_rows = list(
+            session.scalars(
+                select(SubmissionEvaluation).where(
+                    SubmissionEvaluation.submission_id == sub_row.id
+                )
+            ).all()
+        )
+        assert len(eval_rows) == 2
+
+        evidence_rows = list(
+            session.scalars(
+                select(SkillEvidence).where(
+                    SkillEvidence.source_submission_id == sub_row.id
+                )
+            ).all()
+        )
+        assert len(evidence_rows) == 2
+        assert all(ev.verified_level == Decimal("5.00") for ev in evidence_rows)
+
+    # 3. Contador completed_submissions_count na listagem do módulo reflete a entrega avaliada
+    list_res = await tasks_client.get(
+        f"/api/v1/modules/{module.id}/practical-tasks",
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert list_res.status_code == status.HTTP_200_OK
+    task_summary = list_res.json()["data"][0]
+    assert task_summary["completed_submissions_count"] == 1
+    assert task_summary["pending_submissions_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_practical_task_rejects_client_score_manipulation_invalid_criteria_and_rbac(
+    tasks_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida rejeição de manipulação de nota pelo cliente, critérios incompletos, matrícula inativa e RBAC (BE-025)."""
+    admin, admin_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.ADMIN,
+        suffix="admeval025",
+    )
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchrok025",
+    )
+    other_teacher, other_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchrout025",
+    )
+    stu_active, student_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stuact025",
+    )
+    stu_dropped, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="studrop025",
+    )
+    stu_unenrolled, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stuout025",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-MET-025",
+            name="Técnico em Metrologia",
+            description="Curso técnico",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MET-2026-1A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="CAL-025",
+            name="Calibração Dimensional",
+            workload_hours=60,
+            syllabus="Blocos padrão",
+            is_active=True,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Calibração de Micrômetros",
+            order_index=1,
+            practical_hours=30,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp_1 = CompetencyRepository(session).create(
+            code="COMP-CAL-01",
+            title="Aferição com Blocos Padrão",
+            category=CompetencyCategory.TECHNICAL,
+        )
+        comp_2 = CompetencyRepository(session).create(
+            code="COMP-CAL-02",
+            title="Registro de Incerteza de Medição",
+            category=CompetencyCategory.PROCEDURAL,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subject.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=stu_active.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=stu_dropped.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.DROPPED,
+                ),
+            ]
+        )
+        session.commit()
+
+    create_res = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(module.id),
+            "class_id": str(academic_class.id),
+            "title": "Calibração de Micrômetro 0-25mm",
+            "due_date": "2026-05-05T18:00:00Z",
+            "criteria": [
+                {
+                    "competency_id": str(comp_1.id),
+                    "criterion_name": "Paralelismo das Faces de Medição",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                },
+                {
+                    "competency_id": str(comp_2.id),
+                    "criterion_name": "Preenchimento da Folha de Calibração",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert create_res.status_code == status.HTTP_201_CREATED
+    task_data = create_res.json()
+    task_id = UUID(task_data["id"])
+    crit_1_id = UUID(task_data["criteria"][0]["id"])
+    crit_2_id = UUID(task_data["criteria"][1]["id"])
+
+    valid_eval_payload = {
+        "student_id": str(stu_active.id),
+        "status": "EVALUATED",
+        "evaluations": [
+            {"criterion_id": str(crit_1_id), "achieved_level": 4},
+            {"criterion_id": str(crit_2_id), "achieved_level": 4},
+        ],
+    }
+
+    # 1. Cliente tentando manipular final_task_score ou score_awarded -> HTTP 400 (extra="forbid")
+    res_manipulated = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={**valid_eval_payload, "final_task_score": "10.00"},
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_manipulated.status_code == status.HTTP_400_BAD_REQUEST
+
+    # 2. Critérios incompletos ou criterion_id estranho à tarefa -> HTTP 400
+    res_incomplete = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={
+            "student_id": str(stu_active.id),
+            "status": "EVALUATED",
+            "evaluations": [{"criterion_id": str(crit_1_id), "achieved_level": 4}],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_incomplete.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_incomplete.json()["message"] == TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE
+
+    res_foreign_crit = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={
+            "student_id": str(stu_active.id),
+            "status": "EVALUATED",
+            "evaluations": [
+                {"criterion_id": str(crit_1_id), "achieved_level": 4},
+                {"criterion_id": str(uuid4()), "achieved_level": 4},
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_foreign_crit.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_foreign_crit.json()["message"] == TASK_EVALUATION_INVALID_CRITERION_MESSAGE
+
+    # 3. Estudante não matriculado ou com matrícula DROPPED -> HTTP 400
+    res_unenrolled = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={**valid_eval_payload, "student_id": str(stu_unenrolled.id)},
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_unenrolled.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_unenrolled.json()["message"] == TASK_EVALUATION_STUDENT_NOT_ENROLLED_MESSAGE
+
+    res_dropped = await tasks_client.post(
+        f"/api/v1/tasks/{task_id}/evaluations",
+        json={**valid_eval_payload, "student_id": str(stu_dropped.id)},
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_dropped.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_dropped.json()["message"] == TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE
+
+    # 4. RBAC e 404: 401 sem token, 403 STUDENT e docente não alocado, 404 tarefa inexistente
+    assert (
+        await tasks_client.post(f"/api/v1/tasks/{task_id}/evaluations", json=valid_eval_payload)
+    ).status_code == status.HTTP_401_UNAUTHORIZED
+
+    for forbidden_tok in (student_token, other_teacher_token):
+        assert (
+            await tasks_client.post(
+                f"/api/v1/tasks/{task_id}/evaluations",
+                json=valid_eval_payload,
+                headers={"Authorization": f"Bearer {forbidden_tok}"},
+            )
+        ).status_code == status.HTTP_403_FORBIDDEN
+
+    res_404 = await tasks_client.post(
+        f"/api/v1/tasks/{uuid4()}/evaluations",
+        json=valid_eval_payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_404.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404.json()["message"] == PRACTICAL_TASK_NOT_FOUND_MESSAGE
+
