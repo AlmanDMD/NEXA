@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from app.models.academic_assessment import AcademicAssessment
     from app.models.class_lesson import ClassLesson
     from app.models.module_competency import ModuleCompetency
     from app.models.practical_task import PracticalTask
@@ -131,6 +132,11 @@ class LearningModule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     practical_tasks: Mapped[list["PracticalTask"]] = relationship(
         "PracticalTask",
+        back_populates="module",
+        passive_deletes=True,
+    )
+    academic_assessments: Mapped[list["AcademicAssessment"]] = relationship(
+        "AcademicAssessment",
         back_populates="module",
         passive_deletes=True,
     )

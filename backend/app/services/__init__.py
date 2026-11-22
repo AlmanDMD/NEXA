@@ -1,5 +1,23 @@
 """Camada de services (regras de negócio da aplicação)."""
 
+from app.services.academic_assessment_service import (
+    ASSESSMENT_CLASS_NOT_FOUND_MESSAGE,
+    ASSESSMENT_INACTIVE_CLASS_MESSAGE,
+    ASSESSMENT_INACTIVE_SUBJECT_MESSAGE,
+    ASSESSMENT_MODULE_NOT_FOUND_MESSAGE,
+    ASSESSMENT_MODULE_SUBJECT_MISMATCH_MESSAGE,
+    ASSESSMENT_NOT_FOUND_MESSAGE,
+    ASSESSMENT_SUBJECT_COURSE_MISMATCH_MESSAGE,
+    ASSESSMENT_SUBJECT_NOT_FOUND_MESSAGE,
+    ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE,
+    AcademicAssessmentService,
+    AcademicAssessmentServiceDep,
+    GRADE_EXCEEDS_MAX_GRADE_MESSAGE,
+    GRADE_INACTIVE_ENROLLMENT_MESSAGE,
+    GRADE_STUDENT_NOT_ENROLLED_MESSAGE,
+    compute_senai_effective_grade,
+    get_academic_assessment_service,
+)
 from app.services.academic_class_service import (
     AcademicClassService,
     AcademicClassServiceDep,
@@ -151,6 +169,15 @@ from app.services.teacher_assignment_service import (
 )
 
 __all__ = [
+    "ASSESSMENT_CLASS_NOT_FOUND_MESSAGE",
+    "ASSESSMENT_INACTIVE_CLASS_MESSAGE",
+    "ASSESSMENT_INACTIVE_SUBJECT_MESSAGE",
+    "ASSESSMENT_MODULE_NOT_FOUND_MESSAGE",
+    "ASSESSMENT_MODULE_SUBJECT_MISMATCH_MESSAGE",
+    "ASSESSMENT_NOT_FOUND_MESSAGE",
+    "ASSESSMENT_SUBJECT_COURSE_MISMATCH_MESSAGE",
+    "ASSESSMENT_SUBJECT_NOT_FOUND_MESSAGE",
+    "ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE",
     "ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE",
     "ATTENDANCE_CRITICAL_THRESHOLD",
     "ATTENDANCE_FAIL_THRESHOLD",
@@ -158,6 +185,8 @@ __all__ = [
     "ATTENDANCE_MAX_ABSENCE_RATIO",
     "ATTENDANCE_PRESENT_WITH_ABSENT_HOURS_MESSAGE",
     "ATTENDANCE_STUDENT_NOT_ENROLLED_MESSAGE",
+    "AcademicAssessmentService",
+    "AcademicAssessmentServiceDep",
     "AcademicClassService",
     "AcademicClassServiceDep",
     "AuditService",
@@ -194,6 +223,9 @@ __all__ = [
     "ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE",
     "EnrollmentService",
     "EnrollmentServiceDep",
+    "GRADE_EXCEEDS_MAX_GRADE_MESSAGE",
+    "GRADE_INACTIVE_ENROLLMENT_MESSAGE",
+    "GRADE_STUDENT_NOT_ENROLLED_MESSAGE",
     "HealthService",
     "HealthServiceDep",
     "INVALID_CREDENTIALS_MESSAGE",
@@ -263,7 +295,9 @@ __all__ = [
     "TeacherAssignmentService",
     "TeacherAssignmentServiceDep",
     "compute_attendance_margin_metrics",
+    "compute_senai_effective_grade",
     "evaluate_attendance_risk_level",
+    "get_academic_assessment_service",
     "get_academic_class_service",
     "get_audit_service",
     "get_auth_service",
