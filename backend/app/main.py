@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import logger, setup_logging
 from app.middlewares.cors import setup_cors_middleware
+from app.routers.assessments import router as assessments_router
 from app.routers.auth import router as auth_router
 from app.routers.classes import router as classes_router
 from app.routers.competencies import router as competencies_router
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     application.include_router(learning_modules_router)
     application.include_router(lessons_router)
     application.include_router(practical_tasks_router)
+    application.include_router(assessments_router)
     application.include_router(competencies_router)
     application.include_router(enrollments_router)
     application.include_router(teacher_assignments_router)

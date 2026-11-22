@@ -73,7 +73,16 @@ class SubmissionStatus(StrEnum):
     LATE = "LATE"
 
 
+class AssessmentType(StrEnum):
+    """Tipos de avaliação formativa, prova teórica/prática ou projeto — 'assessment_type_enum' (DB-027)."""
+
+    EXAM = "EXAM"
+    MICRO_EVALUATION = "MICRO_EVALUATION"
+    PROJECT = "PROJECT"
+
+
 __all__ = [
+    "AssessmentType",
     "AttendanceStatus",
     "ClassStatus",
     "CompetencyCategory",

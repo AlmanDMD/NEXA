@@ -1,5 +1,10 @@
 """Camada de repositories (acesso e persistência de dados)."""
 
+from app.repositories.academic_assessment_repository import (
+    AcademicAssessmentRepository,
+    AcademicAssessmentRepositoryDep,
+    get_academic_assessment_repository,
+)
 from app.repositories.academic_class_repository import (
     AcademicClassRepository,
     AcademicClassRepositoryDep,
@@ -57,6 +62,8 @@ from app.repositories.teacher_assignment_repository import (
 )
 
 __all__ = [
+    "AcademicAssessmentRepository",
+    "AcademicAssessmentRepositoryDep",
     "AcademicClassRepository",
     "AcademicClassRepositoryDep",
     "AuditRepository",
@@ -79,6 +86,7 @@ __all__ = [
     "SubjectRepositoryDep",
     "TeacherAssignmentRepository",
     "TeacherAssignmentRepositoryDep",
+    "get_academic_assessment_repository",
     "get_academic_class_repository",
     "get_audit_repository",
     "get_auth_repository",

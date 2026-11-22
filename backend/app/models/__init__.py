@@ -1,5 +1,6 @@
 """Camada de models (entidades de domínio / persistência SQLAlchemy 2.0)."""
 
+from app.models.academic_assessment import AcademicAssessment, StudentGrade
 from app.models.academic_class import AcademicClass
 from app.models.audit_log import AuditLog
 from app.models.auth_session import AuthSession
@@ -29,6 +30,7 @@ from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User, UserProfile
 
 __all__ = [
+    "AcademicAssessment",
     "AcademicClass",
     "AttendanceRecord",
     "AuditLog",
@@ -42,6 +44,7 @@ __all__ = [
     "ModuleCompetency",
     "PracticalTask",
     "SkillEvidence",
+    "StudentGrade",
     "Subject",
     "SubmissionEvaluation",
     "TaskCriterion",
