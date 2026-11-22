@@ -11,9 +11,18 @@ from pydantic_core import PydanticCustomError
 
 from app.schemas.academic_class import ISODate
 from app.schemas.base import BaseResponseSchema, EntityResponseSchema, StrictRequestSchema
-from app.schemas.class_lesson import LessonModuleSummarySchema, LessonSubjectSummarySchema
+from app.schemas.class_lesson import (
+    LessonModuleSummarySchema,
+    LessonSubjectSummarySchema,
+    StudentAttendanceSummaryStudentSchema,
+)
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import AssessmentType
+from app.schemas.enums import (
+    AcademicStandingStatus,
+    AssessmentType,
+    EnrollmentStatus,
+    RiskLevel,
+)
 from app.schemas.learning_module import _parse_decimal_two_places
 from app.schemas.validators import sanitize_optional_text, sanitize_text
 
@@ -422,6 +431,233 @@ class BatchStudentGradesResponseSchema(BaseResponseSchema):
         return value.quantize(_DECIMAL_QUANTIZER)
 
 
+class ClassGradesSummaryQueryParams(StrictRequestSchema):
+    """Filtros opcionais para consulta do boletim consolidado de médias da turma (BE-028)."""
+
+    subject_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da disciplina técnica",
+    )
+    module_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID do módulo de aprendizagem prática",
+    )
+    student_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID de um estudante específico da turma",
+    )
+    status: AcademicStandingStatus | None = Field(
+        default=None,
+        description="Filtro opcional pela situação acadêmica consolidada (APPROVED, IN_RECOVERY, AT_RISK)",
+    )
+
+
+type ClassGradesSummaryParamsDep = Annotated[
+    ClassGradesSummaryQueryParams,
+    Query(),
+]
+
+
+class StudentModuleAverageSchema(BaseResponseSchema):
+    """Média ponderada consolidada de um estudante em um módulo prático (BE-028)."""
+
+    module_id: UUID = Field(description="Identificador UUID do módulo prático")
+    subject_id: UUID = Field(description="Identificador UUID da disciplina técnica")
+    module_title: str = Field(description="Título do módulo de aprendizagem prática")
+    order_index: int = Field(ge=1, description="Ordem didática do módulo na disciplina")
+    module_weight: Decimal = Field(description="Peso ponderado do módulo na disciplina")
+    passing_score: Decimal = Field(
+        description="Nota mínima de corte do módulo para aprovação",
+    )
+    assessments_count: int = Field(
+        ge=0,
+        description="Quantidade de avaliações formativas com nota lançada neste módulo",
+    )
+    practical_tasks_count: int = Field(
+        ge=0,
+        description="Quantidade de atividades práticas avaliadas neste módulo",
+    )
+    assessments_average: Decimal | None = Field(
+        default=None,
+        description="Média ponderada das avaliações formativas (student_grades) do módulo",
+    )
+    practical_tasks_average: Decimal | None = Field(
+        default=None,
+        description="Média das atividades práticas avaliadas (task_submissions) do módulo",
+    )
+    module_average: Decimal | None = Field(
+        default=None,
+        description="Média ponderada consolidada do módulo combinando avaliações e práticas (2 casas decimais)",
+    )
+    is_below_passing_score: bool = Field(
+        description="Indica se a média do módulo está abaixo da nota de corte (passing_score)",
+    )
+    status: AcademicStandingStatus = Field(
+        description="Situação acadêmica no módulo (APPROVED, IN_RECOVERY, AT_RISK)",
+    )
+
+    @field_validator("module_weight", "passing_score", mode="after")
+    @classmethod
+    def quantize_required_decimals(cls, value: Decimal) -> Decimal:
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+    @field_validator(
+        "assessments_average",
+        "practical_tasks_average",
+        "module_average",
+        mode="after",
+    )
+    @classmethod
+    def quantize_optional_decimals(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class StudentSubjectAverageSchema(BaseResponseSchema):
+    """Média ponderada consolidada de um estudante em uma disciplina técnica e seus módulos (BE-028)."""
+
+    subject_id: UUID = Field(description="Identificador UUID da disciplina técnica")
+    subject_code: str = Field(description="Código identificador da disciplina")
+    subject_name: str = Field(description="Nome oficial da disciplina")
+    passing_score: Decimal = Field(
+        description="Nota mínima de corte de referência da disciplina",
+    )
+    subject_average: Decimal | None = Field(
+        default=None,
+        description="Média ponderada consolidada da disciplina (2 casas decimais)",
+    )
+    is_below_passing_score: bool = Field(
+        description="Indica se a média da disciplina está abaixo da nota de corte",
+    )
+    status: AcademicStandingStatus = Field(
+        description="Situação acadêmica na disciplina (APPROVED, IN_RECOVERY, AT_RISK)",
+    )
+    modules: list[StudentModuleAverageSchema] = Field(
+        default_factory=list,
+        description="Detalhamento das médias ponderadas por módulo prático da disciplina",
+    )
+
+    @field_validator("passing_score", mode="after")
+    @classmethod
+    def quantize_passing_score(cls, value: Decimal) -> Decimal:
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+    @field_validator("subject_average", mode="after")
+    @classmethod
+    def quantize_subject_average(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class StudentClassGradeReportSchema(BaseResponseSchema):
+    """Boletim consolidado de um estudante na turma com médias por disciplina, módulo e situação (BE-028)."""
+
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula na turma")
+    student_id: UUID = Field(description="Identificador UUID do estudante")
+    enrollment_status: EnrollmentStatus = Field(
+        description="Status atual da matrícula (ACTIVE, COMPLETED, DROPPED, SUSPENDED)",
+    )
+    student: StudentAttendanceSummaryStudentSchema = Field(
+        description="Dados cadastrais resumidos do estudante",
+    )
+    attendance_rate: Decimal | None = Field(
+        default=None,
+        description="Taxa de frequência consolidada da matrícula (%)",
+    )
+    passing_score: Decimal = Field(
+        description="Nota de corte de referência para aprovação na turma",
+    )
+    final_grade: Decimal | None = Field(
+        default=None,
+        description="Média final consolidada do estudante na turma (persistida em enrollments.final_grade)",
+    )
+    is_below_passing_score: bool = Field(
+        description="Indica se a média final do estudante está abaixo da nota de corte",
+    )
+    status: AcademicStandingStatus = Field(
+        description="Situação acadêmica geral do estudante (APPROVED, IN_RECOVERY, AT_RISK)",
+    )
+    risk_level: RiskLevel = Field(
+        description="Indicador de risco acadêmico derivado da média e frequência (pronto para RiskEngineService)",
+    )
+    below_passing_modules_count: int = Field(
+        ge=0,
+        description="Quantidade de módulos em que o estudante está abaixo da nota de corte",
+    )
+    subjects: list[StudentSubjectAverageSchema] = Field(
+        default_factory=list,
+        description="Médias consolidadas agrupadas por disciplina técnica",
+    )
+    modules: list[StudentModuleAverageSchema] = Field(
+        default_factory=list,
+        description="Lista linear das médias ponderadas por módulo prático",
+    )
+
+    @field_validator("passing_score", mode="after")
+    @classmethod
+    def quantize_passing_score(cls, value: Decimal) -> Decimal:
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+    @field_validator("final_grade", "attendance_rate", mode="after")
+    @classmethod
+    def quantize_optional_metrics(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class ClassGradesSummaryResponseSchema(BaseResponseSchema):
+    """Boletim consolidado de médias da turma com contadores de aprovação, recuperação e risco (BE-028)."""
+
+    class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
+    academic_class: EnrollmentClassSummarySchema = Field(
+        description="Metadados resumidos da turma acadêmica",
+    )
+    calculated_at: datetime = Field(
+        description="Timestamp UTC do cálculo/consulta das médias ponderadas",
+    )
+    persisted_to_enrollments: bool = Field(
+        description="Indica se as médias calculadas foram persistidas em enrollments.final_grade",
+    )
+    updated_enrollments_count: int = Field(
+        ge=0,
+        description="Quantidade de matrículas atualizadas em enrollments.final_grade nesta operação",
+    )
+    total_students: int = Field(
+        ge=0,
+        description="Total de estudantes incluídos no boletim da turma",
+    )
+    approved_count: int = Field(
+        ge=0,
+        description="Quantidade de estudantes com situação APPROVED",
+    )
+    in_recovery_count: int = Field(
+        ge=0,
+        description="Quantidade de estudantes com situação IN_RECOVERY",
+    )
+    at_risk_count: int = Field(
+        ge=0,
+        description="Quantidade de estudantes com situação AT_RISK",
+    )
+    class_average_grade: Decimal | None = Field(
+        default=None,
+        description="Média geral consolidada da turma entre estudantes com média calculada",
+    )
+    students: list[StudentClassGradeReportSchema] = Field(
+        default_factory=list,
+        description="Boletins individuais dos estudantes ordenados alfabeticamente",
+    )
+
+    @field_validator("class_average_grade", mode="after")
+    @classmethod
+    def quantize_class_average(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
 __all__ = [
     "AcademicAssessmentCreateSchema",
     "AcademicAssessmentListParamsDep",
@@ -433,11 +669,17 @@ __all__ = [
     "AssessmentWeightDecimal",
     "BatchStudentGradesRequestSchema",
     "BatchStudentGradesResponseSchema",
+    "ClassGradesSummaryParamsDep",
+    "ClassGradesSummaryQueryParams",
+    "ClassGradesSummaryResponseSchema",
     "OptionalGradeCommentsStr",
     "OptionalRecoveryGradeDecimal",
+    "StudentClassGradeReportSchema",
     "StudentGradeItemInputSchema",
     "StudentGradeItemResponseSchema",
     "StudentGradeValueDecimal",
+    "StudentModuleAverageSchema",
+    "StudentSubjectAverageSchema",
     "validate_assessment_max_grade_pt",
     "validate_assessment_title_pt",
     "validate_assessment_weight_pt",

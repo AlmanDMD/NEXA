@@ -81,7 +81,16 @@ class AssessmentType(StrEnum):
     PROJECT = "PROJECT"
 
 
+class AcademicStandingStatus(StrEnum):
+    """Situação acadêmica consolidada por módulo, disciplina ou turma (BE-028)."""
+
+    APPROVED = "APPROVED"
+    IN_RECOVERY = "IN_RECOVERY"
+    AT_RISK = "AT_RISK"
+
+
 __all__ = [
+    "AcademicStandingStatus",
     "AssessmentType",
     "AttendanceStatus",
     "ClassStatus",
