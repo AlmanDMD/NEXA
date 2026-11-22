@@ -12,11 +12,18 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
+from app.models.base import _utc_now
 from app.models.competency import Competency
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
-from app.models.practical_task import PracticalTask, TaskCriterion, TaskSubmission
+from app.models.practical_task import (
+    PracticalTask,
+    SkillEvidence,
+    SubmissionEvaluation,
+    TaskCriterion,
+    TaskSubmission,
+)
 from app.models.teacher_assignment import TeacherAssignment
 from app.schemas.enums import EnrollmentStatus, SubmissionStatus
 
@@ -254,6 +261,144 @@ class PracticalTaskRepository:
         )
         items = list(self._session.scalars(items_stmt).unique().all())
         return items, total
+
+    def get_enrollment_by_class_and_student(
+        self,
+        *,
+        class_id: UUID,
+        student_id: UUID,
+    ) -> Enrollment | None:
+        """Busca a matrícula do estudante na turma informada."""
+        stmt = select(Enrollment).where(
+            Enrollment.class_id == class_id,
+            Enrollment.student_id == student_id,
+        )
+        return self._session.scalar(stmt)
+
+    def get_submission_by_task_and_student(
+        self,
+        *,
+        task_id: UUID,
+        student_id: UUID,
+    ) -> TaskSubmission | None:
+        """Busca a submissão prática existente para a tarefa e estudante com avaliações e evidências."""
+        stmt = (
+            select(TaskSubmission)
+            .options(
+                selectinload(TaskSubmission.evaluations).joinedload(
+                    SubmissionEvaluation.criterion
+                ).joinedload(TaskCriterion.competency),
+                selectinload(TaskSubmission.skill_evidences).joinedload(
+                    SkillEvidence.competency
+                ),
+            )
+            .where(
+                TaskSubmission.task_id == task_id,
+                TaskSubmission.student_id == student_id,
+            )
+        )
+        return self._session.scalar(stmt)
+
+    def evaluate_task_submission_with_evidences(
+        self,
+        *,
+        task: PracticalTask,
+        enrollment: Enrollment,
+        evaluator_id: UUID,
+        final_task_score: Decimal,
+        criterion_evaluations: Sequence[tuple[TaskCriterion, int, Decimal, str | None]],
+        competency_verified_levels: Sequence[tuple[UUID, Decimal]],
+        evidence_url: str | None = None,
+        student_notes: str | None = None,
+    ) -> TaskSubmission:
+        """Executa upsert transacional de task_submissions, submission_evaluations e skill_evidences."""
+        now = _utc_now()
+        submission = self.get_submission_by_task_and_student(
+            task_id=task.id,
+            student_id=enrollment.student_id,
+        )
+        if submission is None:
+            submission = TaskSubmission(
+                task_id=task.id,
+                student_id=enrollment.student_id,
+                enrollment_id=enrollment.id,
+                status=SubmissionStatus.EVALUATED,
+                completed_at=now,
+                evidence_url=evidence_url,
+                student_notes=student_notes,
+                final_task_score=final_task_score,
+            )
+            self._session.add(submission)
+            self._session.flush()
+            existing_evals_by_criterion: dict[UUID, SubmissionEvaluation] = {}
+            existing_evidences_by_comp: dict[UUID, SkillEvidence] = {}
+        else:
+            submission.status = SubmissionStatus.EVALUATED
+            submission.final_task_score = final_task_score
+            if submission.completed_at is None:
+                submission.completed_at = now
+            if evidence_url is not None:
+                submission.evidence_url = evidence_url
+            if student_notes is not None:
+                submission.student_notes = student_notes
+            submission.updated_at = now
+            self._session.add(submission)
+            self._session.flush()
+            existing_evals_by_criterion = {
+                ev.criterion_id: ev for ev in submission.evaluations
+            }
+            existing_evidences_by_comp = {
+                se.competency_id: se for se in submission.skill_evidences
+            }
+
+        for criterion, achieved_level, score_awarded, technical_feedback in criterion_evaluations:
+            existing_eval = existing_evals_by_criterion.get(criterion.id)
+            if existing_eval is not None:
+                existing_eval.evaluator_id = evaluator_id
+                existing_eval.achieved_level = achieved_level
+                existing_eval.score_awarded = score_awarded
+                existing_eval.technical_feedback = technical_feedback
+                existing_eval.evaluated_at = now
+                self._session.add(existing_eval)
+            else:
+                new_eval = SubmissionEvaluation(
+                    submission_id=submission.id,
+                    criterion_id=criterion.id,
+                    evaluator_id=evaluator_id,
+                    achieved_level=achieved_level,
+                    score_awarded=score_awarded,
+                    technical_feedback=technical_feedback,
+                    evaluated_at=now,
+                )
+                self._session.add(new_eval)
+
+        for competency_id, verified_level in competency_verified_levels:
+            existing_evidence = existing_evidences_by_comp.get(competency_id)
+            if existing_evidence is not None:
+                existing_evidence.verified_level = verified_level
+                existing_evidence.verified_by = evaluator_id
+                existing_evidence.recorded_at = now
+                self._session.add(existing_evidence)
+            else:
+                new_evidence = SkillEvidence(
+                    student_id=enrollment.student_id,
+                    competency_id=competency_id,
+                    source_submission_id=submission.id,
+                    verified_level=verified_level,
+                    verified_by=evaluator_id,
+                    recorded_at=now,
+                )
+                self._session.add(new_evidence)
+
+        self._session.commit()
+        self._session.refresh(submission)
+        return (
+            self.get_submission_by_task_and_student(
+                task_id=task.id,
+                student_id=enrollment.student_id,
+            )
+            or submission
+        )
 
 
 def get_practical_task_repository(session: DbSessionDep) -> PracticalTaskRepository:

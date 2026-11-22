@@ -19,11 +19,12 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, _utc_now
 from app.models.learning_module import _coerce_orm_decimal
 from app.schemas.enums import SubmissionStatus
 
@@ -327,6 +328,20 @@ class TaskSubmission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     student: Mapped["User"] = relationship("User")
     enrollment: Mapped["Enrollment"] = relationship("Enrollment")
+    evaluations: Mapped[list["SubmissionEvaluation"]] = relationship(
+        "SubmissionEvaluation",
+        back_populates="submission",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+    skill_evidences: Mapped[list["SkillEvidence"]] = relationship(
+        "SkillEvidence",
+        back_populates="source_submission",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
 
     @validates("evidence_url")
     def _validate_evidence_url(self, _key: str, value: str | None) -> str | None:
@@ -359,4 +374,198 @@ class TaskSubmission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         return parsed
 
 
-__all__ = ["PracticalTask", "TaskCriterion", "TaskSubmission"]
+class SubmissionEvaluation(Base, UUIDPrimaryKeyMixin):
+    """Avaliação do docente por rubrica/critério técnico de uma entrega prática (tabela 'submission_evaluations' - DB-026)."""
+
+    __tablename__ = "submission_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "submission_id",
+            "criterion_id",
+            name="uq_submission_evaluations_submission_criterion",
+        ),
+        CheckConstraint(
+            "achieved_level >= 1 AND achieved_level <= 5",
+            name="chk_submission_evaluations_achieved_level",
+        ),
+        CheckConstraint(
+            "score_awarded >= 0 AND score_awarded <= 10",
+            name="chk_submission_evaluations_score_awarded",
+        ),
+        Index("idx_submission_evaluations_submission", "submission_id"),
+        Index("idx_submission_evaluations_evaluator", "evaluator_id"),
+    )
+
+    submission_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("task_submissions.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    criterion_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("task_criteria.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    evaluator_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    achieved_level: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    score_awarded: Mapped[Decimal] = mapped_column(
+        Numeric(4, 2, asdecimal=True),
+        nullable=False,
+    )
+    technical_feedback: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utc_now,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    submission: Mapped["TaskSubmission"] = relationship(
+        "TaskSubmission",
+        back_populates="evaluations",
+    )
+    criterion: Mapped["TaskCriterion"] = relationship(
+        "TaskCriterion",
+        lazy="joined",
+        innerjoin=True,
+    )
+    evaluator: Mapped["User"] = relationship(
+        "User",
+        lazy="joined",
+        innerjoin=True,
+    )
+
+    @validates("achieved_level")
+    def _validate_achieved_level(self, _key: str, value: int) -> int:
+        """Garante que o nível atingido pelo estudante na rubrica seja um inteiro entre 1 e 5."""
+        if not isinstance(value, int) or isinstance(value, bool) or not (1 <= value <= 5):
+            raise ValueError(
+                "O nível atingido (achieved_level) deve ser um inteiro entre 1 e 5."
+            )
+        return value
+
+    @validates("score_awarded")
+    def _validate_score_awarded(self, _key: str, value: Any) -> Decimal:
+        """Valida que a nota atribuída ao critério esteja entre 0.00 e 10.00."""
+        parsed = _coerce_orm_decimal(
+            value,
+            field_label="A pontuação do critério (score_awarded)",
+        )
+        if not (Decimal("0.00") <= parsed <= Decimal("10.00")):
+            raise ValueError(
+                "A pontuação do critério (score_awarded) deve estar entre 0.00 e 10.00."
+            )
+        return parsed
+
+    @validates("technical_feedback")
+    def _validate_technical_feedback(self, _key: str, value: str | None) -> str | None:
+        """Normaliza o feedback técnico opcional convertendo string vazia em None."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("O feedback técnico (technical_feedback) deve ser um texto válido.")
+        normalized = value.strip()
+        if len(normalized) > 1000:
+            raise ValueError(
+                "O feedback técnico (technical_feedback) deve ter no máximo 1000 caracteres."
+            )
+        return normalized or None
+
+
+class SkillEvidence(Base, UUIDPrimaryKeyMixin):
+    """Evidência prática verificada pelo docente que comprova o domínio de uma competência (tabela 'skill_evidences' - DB-033)."""
+
+    __tablename__ = "skill_evidences"
+    __table_args__ = (
+        CheckConstraint(
+            "verified_level >= 1.00 AND verified_level <= 5.00",
+            name="chk_skill_evidences_verified_level",
+        ),
+        Index("idx_skill_evidences_student_competency", "student_id", "competency_id"),
+        Index("idx_skill_evidences_submission", "source_submission_id"),
+    )
+
+    student_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    competency_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("competencies.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    source_submission_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("task_submissions.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=True,
+    )
+    source_assessment_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+    )
+    verified_level: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2, asdecimal=True),
+        nullable=False,
+    )
+    verified_by: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utc_now,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    student: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[student_id],
+    )
+    competency: Mapped["Competency"] = relationship(
+        "Competency",
+        lazy="joined",
+        innerjoin=True,
+    )
+    source_submission: Mapped["TaskSubmission | None"] = relationship(
+        "TaskSubmission",
+        back_populates="skill_evidences",
+    )
+    verifier: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[verified_by],
+    )
+
+    @validates("verified_level")
+    def _validate_verified_level(self, _key: str, value: Any) -> Decimal:
+        """Valida que o nível verificado pelo docente esteja na escala 1.00 a 5.00."""
+        parsed = _coerce_orm_decimal(
+            value,
+            field_label="O nível verificado (verified_level)",
+        )
+        if not (Decimal("1.00") <= parsed <= Decimal("5.00")):
+            raise ValueError(
+                "O nível verificado (verified_level) deve estar entre 1.00 e 5.00."
+            )
+        return parsed
+
+
+__all__ = [
+    "PracticalTask",
+    "SkillEvidence",
+    "SubmissionEvaluation",
+    "TaskCriterion",
+    "TaskSubmission",
+]
