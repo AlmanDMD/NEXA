@@ -28,6 +28,7 @@ from app.models import (
     AcademicClass,
     AuditLog,
     Base,
+    Competency,
     Course,
     Enrollment,
     LearningModule,
@@ -38,6 +39,7 @@ from app.models import (
 )
 from app.repositories.academic_class_repository import AcademicClassRepository
 from app.repositories.auth_repository import AuthRepository
+from app.repositories.competency_repository import CompetencyRepository
 from app.repositories.course_repository import CourseRepository
 from app.repositories.learning_module_repository import LearningModuleRepository
 from app.repositories.subject_repository import SubjectRepository
@@ -51,9 +53,12 @@ from app.schemas.academic_assessment import (
     validate_student_grade_value_pt,
 )
 from app.schemas.enums import (
+    AcademicStandingStatus,
     AssessmentType,
     ClassStatus,
+    CompetencyCategory,
     EnrollmentStatus,
+    RiskLevel,
     Shift,
     UserRole,
 )
@@ -68,9 +73,12 @@ from app.services.academic_assessment_service import (
     ASSESSMENT_SUBJECT_COURSE_MISMATCH_MESSAGE,
     ASSESSMENT_SUBJECT_NOT_FOUND_MESSAGE,
     ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE,
+    CLASS_AVERAGES_CLOSED_CLASS_MESSAGE,
+    CLASS_AVERAGES_TEACHER_FORBIDDEN_MESSAGE,
     GRADE_EXCEEDS_MAX_GRADE_MESSAGE,
     GRADE_INACTIVE_ENROLLMENT_MESSAGE,
     GRADE_STUDENT_NOT_ENROLLED_MESSAGE,
+    classify_academic_standing,
     compute_senai_effective_grade,
 )
 
@@ -938,3 +946,477 @@ async def test_assessments_and_grades_reject_unenrolled_students_out_of_range_gr
     )
     assert res_404.status_code == status.HTTP_404_NOT_FOUND
     assert res_404.json()["message"] == ASSESSMENT_NOT_FOUND_MESSAGE
+
+
+def test_classify_academic_standing_rules() -> None:
+    """Valida classificação determinística APPROVED, IN_RECOVERY e AT_RISK com precisão Decimal (BE-028)."""
+    # Acima da nota de corte (6.00) com boa frequência -> APPROVED / LOW
+    assert classify_academic_standing(
+        Decimal("7.50"),
+        passing_score=Decimal("6.00"),
+        attendance_rate=Decimal("92.00"),
+    ) == (AcademicStandingStatus.APPROVED, RiskLevel.LOW, False)
+
+    # Entre 4.00 e 5.99 com frequência OK -> IN_RECOVERY / MODERATE
+    assert classify_academic_standing(
+        Decimal("5.25"),
+        passing_score=Decimal("6.00"),
+        attendance_rate=Decimal("88.00"),
+    ) == (AcademicStandingStatus.IN_RECOVERY, RiskLevel.MODERATE, True)
+
+    # Abaixo de 4.00 -> AT_RISK / CRITICAL
+    assert classify_academic_standing(
+        Decimal("3.50"),
+        passing_score=Decimal("6.00"),
+        attendance_rate=Decimal("95.00"),
+    ) == (AcademicStandingStatus.AT_RISK, RiskLevel.CRITICAL, True)
+
+    # Nota acima da corte mas frequência < 75% -> AT_RISK / CRITICAL
+    assert classify_academic_standing(
+        Decimal("8.50"),
+        passing_score=Decimal("6.00"),
+        attendance_rate=Decimal("70.00"),
+    ) == (AcademicStandingStatus.AT_RISK, RiskLevel.CRITICAL, False)
+
+    # Sem notas ainda (None) e sem faltas críticas -> IN_RECOVERY / LOW (não abaixo da corte)
+    assert classify_academic_standing(
+        None,
+        passing_score=Decimal("6.00"),
+        attendance_rate=None,
+    ) == (AcademicStandingStatus.IN_RECOVERY, RiskLevel.LOW, False)
+
+
+@pytest.mark.asyncio
+async def test_calculate_class_averages_and_grades_summary_weighted_decimal_precision(
+    assessments_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida POST /api/v1/classes/{id}/calculate-averages e GET /api/v1/classes/{id}/grades-summary combinando provas e tarefas práticas (BE-028)."""
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="avg_tchr028",
+        full_name="Prof. Fechamento Médias",
+    )
+    stu_approved, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="avg_a028",
+        full_name="Ana Beatriz",
+    )
+    stu_recovery, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="avg_b028",
+        full_name="Bruno Silva",
+    )
+    stu_at_risk, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="avg_c028",
+        full_name="Carlos Souza",
+    )
+    stu_dropped, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="avg_d028",
+        full_name="Daniel Trancado",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-USI-028",
+            name="Técnico em Usinagem de Precisão",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="USI-2026-028",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 6, 30),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-028",
+            name="Tornearia e Metrologia",
+            workload_hours=80,
+            syllabus="Operações de bancada e medição",
+            is_active=True,
+        )
+        # Módulo 1: peso 2.00, nota de corte 6.00
+        mod_1 = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Tornearia Cilíndrica",
+            order_index=1,
+            practical_hours=40,
+            module_weight=Decimal("2.00"),
+            passing_score=Decimal("6.00"),
+        )
+        # Módulo 2: peso 1.00, nota de corte 6.00
+        mod_2 = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Metrologia com Micrômetro",
+            order_index=2,
+            practical_hours=40,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp = CompetencyRepository(session).create(
+            code="COMP-USI-028",
+            title="Controle Dimensional H7",
+            category=CompetencyCategory.TECHNICAL,
+        )
+        enr_approved = Enrollment(
+            student_id=stu_approved.id,
+            class_id=academic_class.id,
+            enrollment_date=date(2026, 2, 1),
+            status=EnrollmentStatus.ACTIVE,
+            attendance_rate=Decimal("95.00"),
+        )
+        enr_recovery = Enrollment(
+            student_id=stu_recovery.id,
+            class_id=academic_class.id,
+            enrollment_date=date(2026, 2, 1),
+            status=EnrollmentStatus.ACTIVE,
+            attendance_rate=Decimal("88.00"),
+        )
+        enr_at_risk = Enrollment(
+            student_id=stu_at_risk.id,
+            class_id=academic_class.id,
+            enrollment_date=date(2026, 2, 1),
+            status=EnrollmentStatus.ACTIVE,
+            attendance_rate=Decimal("90.00"),
+        )
+        enr_dropped = Enrollment(
+            student_id=stu_dropped.id,
+            class_id=academic_class.id,
+            enrollment_date=date(2026, 2, 1),
+            status=EnrollmentStatus.DROPPED,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subject.id,
+                    is_main_teacher=True,
+                ),
+                enr_approved,
+                enr_recovery,
+                enr_at_risk,
+                enr_dropped,
+            ]
+        )
+        session.commit()
+        enr_approved_id = enr_approved.id
+        enr_recovery_id = enr_recovery.id
+        enr_at_risk_id = enr_at_risk.id
+
+    headers = {"Authorization": f"Bearer {teacher_token}"}
+
+    # 1. Cria 2 avaliações formativas:
+    # - Prova Módulo 1 (weight=2.00)
+    # - Microavaliação Módulo 2 (weight=1.00)
+    res_a1 = await assessments_client.post(
+        "/api/v1/assessments",
+        json={
+            "class_id": str(academic_class.id),
+            "subject_id": str(subject.id),
+            "module_id": str(mod_1.id),
+            "title": "Prova Teórica Tornearia",
+            "assessment_type": "EXAM",
+            "weight": "2.00",
+            "application_date": "2026-04-10",
+            "max_grade": "10.00",
+        },
+        headers=headers,
+    )
+    assert res_a1.status_code == status.HTTP_201_CREATED
+    a1_id = UUID(res_a1.json()["id"])
+
+    res_a2 = await assessments_client.post(
+        "/api/v1/assessments",
+        json={
+            "class_id": str(academic_class.id),
+            "subject_id": str(subject.id),
+            "module_id": str(mod_2.id),
+            "title": "Microavaliação Micrômetro",
+            "assessment_type": "MICRO_EVALUATION",
+            "weight": "1.00",
+            "application_date": "2026-04-20",
+            "max_grade": "10.00",
+        },
+        headers=headers,
+    )
+    assert res_a2.status_code == status.HTTP_201_CREATED
+    a2_id = UUID(res_a2.json()["id"])
+
+    # 2. Cria 1 atividade prática no Módulo 1 (weight padrão=1.00) e avalia os 3 alunos:
+    res_task = await assessments_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(mod_1.id),
+            "class_id": str(academic_class.id),
+            "title": "Usinagem de Eixo Escalonado",
+            "due_date": "2026-04-25T18:00:00Z",
+            "max_score": "10.00",
+            "criteria": [
+                {
+                    "competency_id": str(comp.id),
+                    "criterion_name": "Tolerância Dimensional ±0,02mm",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert res_task.status_code == status.HTTP_201_CREATED
+    task_id = UUID(res_task.json()["id"])
+    crit_id = UUID(res_task.json()["criteria"][0]["id"])
+
+    # Notas práticas (achieved_level 1..5 -> score = level * 2.00):
+    # - Ana: nível 5 -> 10.00
+    # - Bruno: nível 3 -> 6.00
+    # - Carlos: nível 1 -> 2.00
+    for stu_id, level in (
+        (stu_approved.id, 5),
+        (stu_recovery.id, 3),
+        (stu_at_risk.id, 1),
+    ):
+        eval_res = await assessments_client.post(
+            f"/api/v1/tasks/{task_id}/evaluations",
+            json={
+                "student_id": str(stu_id),
+                "status": "EVALUATED",
+                "evaluations": [{"criterion_id": str(crit_id), "achieved_level": level}],
+            },
+            headers=headers,
+        )
+        assert eval_res.status_code == status.HTTP_200_OK
+
+    # 3. Lança notas formativas:
+    # Módulo 1 (Prova weight=2.00 + Prática weight=1.00):
+    # - Ana: grade=4.00, recovery=7.00 -> effective=7.00 => Mod1 = (7.00*2 + 10.00*1)/3 = 24/3 = 8.00
+    # - Bruno: grade=4.50 => Mod1 = (4.50*2 + 6.00*1)/3 = 15/3 = 5.00
+    # - Carlos: grade=2.50 => Mod1 = (2.50*2 + 2.00*1)/3 = 7/3 = 2.33
+    assert (
+        await assessments_client.post(
+            f"/api/v1/assessments/{a1_id}/grades",
+            json={
+                "grades": [
+                    {
+                        "student_id": str(stu_approved.id),
+                        "grade_value": "4.00",
+                        "recovery_grade": "7.00",
+                    },
+                    {"student_id": str(stu_recovery.id), "grade_value": "4.50"},
+                    {"student_id": str(stu_at_risk.id), "grade_value": "2.50"},
+                ]
+            },
+            headers=headers,
+        )
+    ).status_code == status.HTTP_200_OK
+
+    # Módulo 2 (Microavaliação weight=1.00):
+    # - Ana: 5.00 => Subject/Final = (8.00*2 + 5.00*1)/3 = 21/3 = 7.00 (APPROVED)
+    # - Bruno: 5.00 => Subject/Final = (5.00*2 + 5.00*1)/3 = 15/3 = 5.00 (IN_RECOVERY)
+    # - Carlos: 4.00 => Subject/Final = (2.33*2 + 4.00*1)/3 = 8.66/3 = 2.89 (AT_RISK)
+    assert (
+        await assessments_client.post(
+            f"/api/v1/assessments/{a2_id}/grades",
+            json={
+                "grades": [
+                    {"student_id": str(stu_approved.id), "grade_value": "5.00"},
+                    {"student_id": str(stu_recovery.id), "grade_value": "5.00"},
+                    {"student_id": str(stu_at_risk.id), "grade_value": "4.00"},
+                ]
+            },
+            headers=headers,
+        )
+    ).status_code == status.HTTP_200_OK
+
+    # 4. GET /api/v1/classes/{id}/grades-summary (consulta read-only sem mutar enrollments.final_grade)
+    summary_res = await assessments_client.get(
+        f"/api/v1/classes/{academic_class.id}/grades-summary",
+        headers=headers,
+    )
+    assert summary_res.status_code == status.HTTP_200_OK
+    summary_body = summary_res.json()
+    assert summary_body["persisted_to_enrollments"] is False
+    assert summary_body["updated_enrollments_count"] == 0
+    assert summary_body["total_students"] == 3
+    assert summary_body["approved_count"] == 1
+    assert summary_body["in_recovery_count"] == 1
+    assert summary_body["at_risk_count"] == 1
+
+    with db_session_factory() as session:
+        assert session.get(Enrollment, enr_approved_id).final_grade is None  # type: ignore[union-attr]
+
+    # 5. POST /api/v1/classes/{id}/calculate-averages (calcula e persiste enrollments.final_grade)
+    calc_res = await assessments_client.post(
+        f"/api/v1/classes/{academic_class.id}/calculate-averages",
+        headers=headers,
+    )
+    assert calc_res.status_code == status.HTTP_200_OK
+    calc_body = calc_res.json()
+
+    assert calc_body["persisted_to_enrollments"] is True
+    assert calc_body["updated_enrollments_count"] == 3
+    assert calc_body["total_students"] == 3
+    assert calc_body["approved_count"] == 1
+    assert calc_body["in_recovery_count"] == 1
+    assert calc_body["at_risk_count"] == 1
+    # Média da turma: (7.00 + 5.00 + 2.89) / 3 = 14.89 / 3 = 4.96
+    assert calc_body["class_average_grade"] == "4.96"
+
+    # Ordenação alfabética: Ana Beatriz, Bruno Silva, Carlos Souza
+    assert [s["student"]["full_name"] for s in calc_body["students"]] == [
+        "Ana Beatriz",
+        "Bruno Silva",
+        "Carlos Souza",
+    ]
+    by_stu = {s["student_id"]: s for s in calc_body["students"]}
+
+    ana = by_stu[str(stu_approved.id)]
+    assert ana["final_grade"] == "7.00"
+    assert ana["status"] == AcademicStandingStatus.APPROVED.value
+    assert ana["is_below_passing_score"] is False
+    assert ana["below_passing_modules_count"] == 1  # Módulo 2 = 5.00 < 6.00
+    assert ana["modules"][0]["module_average"] == "8.00"
+    assert ana["modules"][0]["assessments_average"] == "7.00"
+    assert ana["modules"][0]["practical_tasks_average"] == "10.00"
+    assert ana["modules"][0]["status"] == AcademicStandingStatus.APPROVED.value
+    assert ana["modules"][1]["module_average"] == "5.00"
+    assert ana["modules"][1]["status"] == AcademicStandingStatus.IN_RECOVERY.value
+
+    bruno = by_stu[str(stu_recovery.id)]
+    assert bruno["final_grade"] == "5.00"
+    assert bruno["status"] == AcademicStandingStatus.IN_RECOVERY.value
+    assert bruno["is_below_passing_score"] is True
+
+    carlos = by_stu[str(stu_at_risk.id)]
+    assert carlos["final_grade"] == "2.89"
+    assert carlos["status"] == AcademicStandingStatus.AT_RISK.value
+    assert carlos["is_below_passing_score"] is True
+    assert carlos["risk_level"] == RiskLevel.CRITICAL.value
+
+    # Confirma persistência real de final_grade em enrollments no banco
+    with db_session_factory() as session:
+        assert session.get(Enrollment, enr_approved_id).final_grade == Decimal("7.00")  # type: ignore[union-attr]
+        assert session.get(Enrollment, enr_recovery_id).final_grade == Decimal("5.00")  # type: ignore[union-attr]
+        assert session.get(Enrollment, enr_at_risk_id).final_grade == Decimal("2.89")  # type: ignore[union-attr]
+
+    # 6. Filtro por status=AT_RISK em GET /api/v1/classes/{id}/grades-summary
+    filter_res = await assessments_client.get(
+        f"/api/v1/classes/{academic_class.id}/grades-summary?status=AT_RISK",
+        headers=headers,
+    )
+    assert filter_res.status_code == status.HTTP_200_OK
+    assert len(filter_res.json()["students"]) == 1
+    assert filter_res.json()["students"][0]["student_id"] == str(stu_at_risk.id)
+
+
+@pytest.mark.asyncio
+async def test_class_averages_rbac_closed_class_and_not_found(
+    assessments_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida RBAC (401/403), 404 e bloqueio 422 ao tentar fechar médias de turma encerrada (BE-028)."""
+    _admin, admin_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.ADMIN,
+        suffix="adm028",
+    )
+    _unassigned_teacher, unassigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchrout028",
+    )
+    _student, student_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stu028",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-FECH-028",
+            name="Técnico em Mecatrônica",
+            description="Curso técnico",
+            total_hours=1200,
+            is_active=True,
+        )
+        closed_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2025-END",
+            period="2025.2",
+            shift=Shift.NIGHT,
+            max_students=30,
+            status=ClassStatus.COMPLETED,
+            start_date=date(2025, 8, 1),
+            end_date=date(2025, 12, 20),
+        )
+        session.commit()
+
+    # 1. Sem token -> 401
+    assert (
+        await assessments_client.post(
+            f"/api/v1/classes/{closed_class.id}/calculate-averages"
+        )
+    ).status_code == status.HTTP_401_UNAUTHORIZED
+
+    # 2. STUDENT e TEACHER não alocado -> 403
+    for tok in (student_token, unassigned_teacher_token):
+        assert (
+            await assessments_client.post(
+                f"/api/v1/classes/{closed_class.id}/calculate-averages",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+        ).status_code == status.HTTP_403_FORBIDDEN
+        assert (
+            await assessments_client.get(
+                f"/api/v1/classes/{closed_class.id}/grades-summary",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+        ).status_code == status.HTTP_403_FORBIDDEN
+
+    # 3. Turma inexistente -> 404
+    res_404 = await assessments_client.post(
+        f"/api/v1/classes/{uuid4()}/calculate-averages",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_404.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404.json()["message"] == ASSESSMENT_CLASS_NOT_FOUND_MESSAGE
+
+    # 4. POST calculate-averages em turma COMPLETED -> 422, mas GET grades-summary -> 200 OK
+    res_closed_post = await assessments_client.post(
+        f"/api/v1/classes/{closed_class.id}/calculate-averages",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_closed_post.status_code == 422
+    assert res_closed_post.json()["message"] == CLASS_AVERAGES_CLOSED_CLASS_MESSAGE
+
+    res_closed_get = await assessments_client.get(
+        f"/api/v1/classes/{closed_class.id}/grades-summary",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_closed_get.status_code == status.HTTP_200_OK
+    assert res_closed_get.json()["persisted_to_enrollments"] is False
+

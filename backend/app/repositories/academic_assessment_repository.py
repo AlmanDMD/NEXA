@@ -15,9 +15,11 @@ from app.models.academic_assessment import AcademicAssessment, StudentGrade
 from app.models.academic_class import AcademicClass
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
+from app.models.practical_task import PracticalTask, TaskSubmission
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
-from app.schemas.enums import AssessmentType
+from app.models.user import User
+from app.schemas.enums import AssessmentType, EnrollmentStatus
 
 
 class AcademicAssessmentRepository:
@@ -203,6 +205,113 @@ class AcademicAssessmentRepository:
             .order_by(StudentGrade.created_at.asc(), StudentGrade.id.asc())
         )
         return list(self._session.scalars(stmt).all())
+
+    def is_teacher_assigned_to_class(
+        self,
+        *,
+        teacher_id: UUID,
+        class_id: UUID,
+    ) -> bool:
+        """Verifica se o docente leciona ao menos uma disciplina na turma informada."""
+        stmt = (
+            select(TeacherAssignment.id)
+            .where(
+                TeacherAssignment.teacher_id == teacher_id,
+                TeacherAssignment.class_id == class_id,
+            )
+            .limit(1)
+        )
+        return self._session.scalar(stmt) is not None
+
+    def get_teacher_assigned_subject_ids_for_class(
+        self,
+        *,
+        teacher_id: UUID,
+        class_id: UUID,
+    ) -> set[UUID]:
+        """Retorna os UUIDs das disciplinas que o docente leciona na turma informada."""
+        stmt = select(TeacherAssignment.subject_id).where(
+            TeacherAssignment.teacher_id == teacher_id,
+            TeacherAssignment.class_id == class_id,
+        )
+        return set(self._session.scalars(stmt).all())
+
+    def list_class_enrollments_with_students(
+        self,
+        class_id: UUID,
+        *,
+        student_id: UUID | None = None,
+        exclude_dropped: bool = True,
+    ) -> list[Enrollment]:
+        """Lista matrículas da turma com dados do estudante e perfil carregados."""
+        stmt = (
+            select(Enrollment)
+            .options(joinedload(Enrollment.student).selectinload(User.profile))
+            .where(Enrollment.class_id == class_id)
+        )
+        if exclude_dropped:
+            stmt = stmt.where(Enrollment.status != EnrollmentStatus.DROPPED)
+        if student_id is not None:
+            stmt = stmt.where(Enrollment.student_id == student_id)
+        return list(self._session.scalars(stmt).unique().all())
+
+    def list_course_subjects_with_modules(
+        self,
+        course_id: UUID,
+        *,
+        subject_id: UUID | None = None,
+        allowed_subject_ids: Sequence[UUID] | None = None,
+    ) -> list[Subject]:
+        """Lista disciplinas do curso com seus módulos práticos carregados."""
+        stmt = (
+            select(Subject)
+            .options(selectinload(Subject.learning_modules))
+            .where(Subject.course_id == course_id)
+        )
+        if subject_id is not None:
+            stmt = stmt.where(Subject.id == subject_id)
+        if allowed_subject_ids is not None:
+            allowed_list = list(dict.fromkeys(allowed_subject_ids))
+            if not allowed_list:
+                return []
+            stmt = stmt.where(Subject.id.in_(allowed_list))
+        stmt = stmt.order_by(Subject.code.asc(), Subject.name.asc(), Subject.id.asc())
+        return list(self._session.scalars(stmt).unique().all())
+
+    def list_class_assessments_with_grades(
+        self,
+        class_id: UUID,
+        *,
+        subject_id: UUID | None = None,
+        module_id: UUID | None = None,
+    ) -> list[AcademicAssessment]:
+        """Lista todas as avaliações formativas da turma com suas notas (student_grades)."""
+        stmt = (
+            select(AcademicAssessment)
+            .options(selectinload(AcademicAssessment.grades))
+            .where(AcademicAssessment.class_id == class_id)
+        )
+        if subject_id is not None:
+            stmt = stmt.where(AcademicAssessment.subject_id == subject_id)
+        if module_id is not None:
+            stmt = stmt.where(AcademicAssessment.module_id == module_id)
+        return list(self._session.scalars(stmt).unique().all())
+
+    def list_class_practical_tasks_with_submissions(
+        self,
+        class_id: UUID,
+        *,
+        module_id: UUID | None = None,
+    ) -> list[PracticalTask]:
+        """Lista todas as atividades práticas da turma com suas submissões (task_submissions)."""
+        stmt = (
+            select(PracticalTask)
+            .options(selectinload(PracticalTask.submissions))
+            .where(PracticalTask.class_id == class_id)
+        )
+        if module_id is not None:
+            stmt = stmt.where(PracticalTask.module_id == module_id)
+        return list(self._session.scalars(stmt).unique().all())
 
 
 def get_academic_assessment_repository(

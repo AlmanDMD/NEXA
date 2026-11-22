@@ -1,6 +1,6 @@
 """Serviço de domínio para Avaliações Formativas e Lançamento de Notas em Lote com Auditoria (BE-027)."""
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Final
 from uuid import UUID
 
@@ -29,11 +29,26 @@ from app.schemas.academic_assessment import (
     AcademicAssessmentResponseSchema,
     BatchStudentGradesRequestSchema,
     BatchStudentGradesResponseSchema,
+    ClassGradesSummaryQueryParams,
+    ClassGradesSummaryResponseSchema,
+    StudentClassGradeReportSchema,
     StudentGradeItemResponseSchema,
+    StudentModuleAverageSchema,
+    StudentSubjectAverageSchema,
 )
-from app.schemas.class_lesson import LessonModuleSummarySchema, LessonSubjectSummarySchema
+from app.schemas.class_lesson import (
+    LessonModuleSummarySchema,
+    LessonSubjectSummarySchema,
+    StudentAttendanceSummaryStudentSchema,
+)
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import ClassStatus, EnrollmentStatus, UserRole
+from app.schemas.enums import (
+    AcademicStandingStatus,
+    ClassStatus,
+    EnrollmentStatus,
+    RiskLevel,
+    UserRole,
+)
 from app.services.audit_service import AuditService, AuditServiceDep
 
 ASSESSMENT_NOT_FOUND_MESSAGE: Final[str] = "Avaliação formativa não encontrada."
@@ -66,7 +81,78 @@ GRADE_INACTIVE_ENROLLMENT_MESSAGE: Final[str] = (
 GRADE_EXCEEDS_MAX_GRADE_MESSAGE: Final[str] = (
     "A nota informada (grade_value ou recovery_grade) não pode ultrapassar a nota máxima (max_grade) da avaliação."
 )
+CLASS_AVERAGES_TEACHER_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: professor não possui atribuição ativa nesta turma."
+)
+CLASS_AVERAGES_CLOSED_CLASS_MESSAGE: Final[str] = (
+    "Não é possível fechar ou recalcular médias em uma turma cujo período letivo não está ativo."
+)
 _DECIMAL_QUANTIZER: Final[Decimal] = Decimal("0.01")
+_DEFAULT_PASSING_SCORE: Final[Decimal] = Decimal("6.00")
+_PRACTICAL_TASK_DEFAULT_WEIGHT: Final[Decimal] = Decimal("1.00")
+_AT_RISK_RECOVERY_MARGIN: Final[Decimal] = Decimal("2.00")
+_ATTENDANCE_FAIL_THRESHOLD: Final[Decimal] = Decimal("75.00")
+_ATTENDANCE_WARNING_THRESHOLD: Final[Decimal] = Decimal("78.00")
+
+
+def _quantize_decimal(value: Decimal) -> Decimal:
+    """Arredonda Decimal para duas casas decimais usando ROUND_HALF_UP."""
+    return value.quantize(_DECIMAL_QUANTIZER, rounding=ROUND_HALF_UP)
+
+
+def _clamp_grade(value: Decimal) -> Decimal:
+    """Limita uma média calculada ao intervalo [0.00, 10.00] com 2 casas decimais."""
+    quantized = _quantize_decimal(value)
+    return min(Decimal("10.00"), max(Decimal("0.00"), quantized))
+
+
+def classify_academic_standing(
+    average: Decimal | None,
+    *,
+    passing_score: Decimal = _DEFAULT_PASSING_SCORE,
+    attendance_rate: Decimal | None = None,
+) -> tuple[AcademicStandingStatus, RiskLevel, bool]:
+    """Classifica situação acadêmica (APPROVED, IN_RECOVERY, AT_RISK) e nível de risco a partir da média e frequência."""
+    normalized_passing = _quantize_decimal(Decimal(passing_score))
+    critical_grade_threshold = max(
+        Decimal("0.00"),
+        normalized_passing - _AT_RISK_RECOVERY_MARGIN,
+    )
+
+    if average is None:
+        if attendance_rate is not None and attendance_rate < _ATTENDANCE_FAIL_THRESHOLD:
+            return AcademicStandingStatus.AT_RISK, RiskLevel.CRITICAL, False
+        if attendance_rate is not None and attendance_rate < _ATTENDANCE_WARNING_THRESHOLD:
+            return AcademicStandingStatus.IN_RECOVERY, RiskLevel.HIGH, False
+        return AcademicStandingStatus.IN_RECOVERY, RiskLevel.LOW, False
+
+    normalized_avg = _quantize_decimal(Decimal(average))
+    is_below_passing = normalized_avg < normalized_passing
+
+    if not is_below_passing:
+        if attendance_rate is not None and attendance_rate < _ATTENDANCE_FAIL_THRESHOLD:
+            return AcademicStandingStatus.AT_RISK, RiskLevel.CRITICAL, False
+        if attendance_rate is not None and attendance_rate < _ATTENDANCE_WARNING_THRESHOLD:
+            return AcademicStandingStatus.APPROVED, RiskLevel.HIGH, False
+        return AcademicStandingStatus.APPROVED, RiskLevel.LOW, False
+
+    if normalized_avg < critical_grade_threshold or (
+        attendance_rate is not None and attendance_rate < _ATTENDANCE_WARNING_THRESHOLD
+    ):
+        risk = (
+            RiskLevel.CRITICAL
+            if (
+                normalized_avg < critical_grade_threshold
+                or (
+                    attendance_rate is not None
+                    and attendance_rate < _ATTENDANCE_FAIL_THRESHOLD
+                )
+            )
+            else RiskLevel.HIGH
+        )
+        return AcademicStandingStatus.AT_RISK, risk, True
+
+    return AcademicStandingStatus.IN_RECOVERY, RiskLevel.MODERATE, True
 
 
 def compute_senai_effective_grade(
@@ -442,6 +528,447 @@ class AcademicAssessmentService:
             grades=grades_response,
         )
 
+    def _build_class_grades_report(
+        self,
+        class_id: UUID,
+        *,
+        current_user: User,
+        persist_to_enrollments: bool,
+        params: ClassGradesSummaryQueryParams | None = None,
+    ) -> ClassGradesSummaryResponseSchema:
+        """Consolida médias ponderadas por módulo, disciplina e aluno combinando student_grades e task_submissions (BE-028)."""
+        academic_class = self._repository.get_class_by_id(class_id)
+        if academic_class is None:
+            raise NotFoundException(message=ASSESSMENT_CLASS_NOT_FOUND_MESSAGE)
+
+        requested_subject_id = params.subject_id if params is not None else None
+        requested_module_id = params.module_id if params is not None else None
+        requested_student_id = params.student_id if params is not None else None
+        requested_status = params.status if params is not None else None
+
+        allowed_subject_ids: list[UUID] | None = None
+        if current_user.role == UserRole.TEACHER:
+            assigned_subject_ids = self._repository.get_teacher_assigned_subject_ids_for_class(
+                teacher_id=current_user.id,
+                class_id=academic_class.id,
+            )
+            if not assigned_subject_ids:
+                raise ForbiddenException(message=CLASS_AVERAGES_TEACHER_FORBIDDEN_MESSAGE)
+            if (
+                requested_subject_id is not None
+                and requested_subject_id not in assigned_subject_ids
+            ):
+                raise ForbiddenException(message=ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE)
+            if not persist_to_enrollments:
+                allowed_subject_ids = list(assigned_subject_ids)
+
+        if persist_to_enrollments and academic_class.status != ClassStatus.ACTIVE:
+            raise UnprocessableEntityException(
+                message=CLASS_AVERAGES_CLOSED_CLASS_MESSAGE
+            )
+
+        if requested_subject_id is not None:
+            subject = self._repository.get_subject_by_id(requested_subject_id)
+            if subject is None:
+                raise NotFoundException(message=ASSESSMENT_SUBJECT_NOT_FOUND_MESSAGE)
+
+        if requested_module_id is not None:
+            module = self._repository.get_module_by_id(requested_module_id)
+            if module is None:
+                raise NotFoundException(message=ASSESSMENT_MODULE_NOT_FOUND_MESSAGE)
+
+        enrollments = self._repository.list_class_enrollments_with_students(
+            academic_class.id,
+            student_id=requested_student_id,
+            exclude_dropped=True,
+        )
+        enrollments.sort(
+            key=lambda enr: (
+                (
+                    enr.student.profile.full_name.lower()
+                    if enr.student.profile is not None
+                    and enr.student.profile.full_name
+                    else enr.student.email.lower()
+                ),
+                str(enr.student_id),
+            )
+        )
+
+        subjects = self._repository.list_course_subjects_with_modules(
+            academic_class.course_id,
+            subject_id=requested_subject_id,
+            allowed_subject_ids=allowed_subject_ids,
+        )
+        assessments = self._repository.list_class_assessments_with_grades(
+            academic_class.id,
+            subject_id=requested_subject_id,
+            module_id=requested_module_id,
+        )
+        practical_tasks = self._repository.list_class_practical_tasks_with_submissions(
+            academic_class.id,
+            module_id=requested_module_id,
+        )
+
+        # Indexa avaliações formativas por (student_id, module_id) e subject-level (module_id=None)
+        module_assessments_by_student: dict[
+            tuple[UUID, UUID], list[tuple[Decimal, Decimal]]
+        ] = {}
+        unlinked_assessments_by_student_subject: dict[
+            tuple[UUID, UUID], list[tuple[Decimal, Decimal]]
+        ] = {}
+
+        for assessment in assessments:
+            weight = Decimal(assessment.weight)
+            for grade in assessment.grades:
+                effective, _ = compute_senai_effective_grade(
+                    grade.grade_value,
+                    grade.recovery_grade,
+                )
+                if assessment.module_id is not None:
+                    module_assessments_by_student.setdefault(
+                        (grade.student_id, assessment.module_id),
+                        [],
+                    ).append((effective, weight))
+                else:
+                    unlinked_assessments_by_student_subject.setdefault(
+                        (grade.student_id, assessment.subject_id),
+                        [],
+                    ).append((effective, weight))
+
+        # Indexa entregas práticas avaliadas (final_task_score != None) por (student_id, module_id)
+        module_tasks_by_student: dict[tuple[UUID, UUID], list[Decimal]] = {}
+        for task in practical_tasks:
+            for sub in task.submissions:
+                if sub.final_task_score is not None:
+                    module_tasks_by_student.setdefault(
+                        (sub.student_id, task.module_id),
+                        [],
+                    ).append(Decimal(sub.final_task_score))
+
+        now = _utc_now()
+        updated_enrollments_count = 0
+        all_student_reports: list[StudentClassGradeReportSchema] = []
+
+        for enrollment in enrollments:
+            student = enrollment.student
+            profile = student.profile
+            student_summary = StudentAttendanceSummaryStudentSchema(
+                id=student.id,
+                email=student.email,
+                full_name=profile.full_name if profile is not None else None,
+                registration_number=(
+                    profile.registration_number if profile is not None else None
+                ),
+            )
+
+            student_subjects: list[StudentSubjectAverageSchema] = []
+            student_modules_flat: list[StudentModuleAverageSchema] = []
+            evaluated_subject_averages: list[Decimal] = []
+            evaluated_passing_scores: list[Decimal] = []
+
+            for subj in subjects:
+                ordered_modules = sorted(
+                    subj.learning_modules,
+                    key=lambda mod: (mod.order_index, mod.title.lower(), str(mod.id)),
+                )
+                if requested_module_id is not None:
+                    ordered_modules = [
+                        mod for mod in ordered_modules if mod.id == requested_module_id
+                    ]
+                    if not ordered_modules:
+                        continue
+
+                subj_module_reports: list[StudentModuleAverageSchema] = []
+                subj_weighted_sum = Decimal("0.00")
+                subj_weight_total = Decimal("0.00")
+                subj_passing_scores: list[Decimal] = []
+
+                for mod in ordered_modules:
+                    mod_passing = _quantize_decimal(Decimal(mod.passing_score))
+                    mod_weight = _quantize_decimal(Decimal(mod.module_weight))
+                    subj_passing_scores.append(mod_passing)
+
+                    grade_entries = module_assessments_by_student.get(
+                        (student.id, mod.id),
+                        [],
+                    )
+                    task_scores = module_tasks_by_student.get(
+                        (student.id, mod.id),
+                        [],
+                    )
+
+                    assessments_weighted_num = Decimal("0.00")
+                    assessments_weight_den = Decimal("0.00")
+                    for eff_grade, a_weight in grade_entries:
+                        assessments_weighted_num += eff_grade * a_weight
+                        assessments_weight_den += a_weight
+
+                    assessments_avg: Decimal | None = (
+                        _clamp_grade(assessments_weighted_num / assessments_weight_den)
+                        if assessments_weight_den > Decimal("0.00")
+                        else None
+                    )
+
+                    tasks_weighted_num = Decimal("0.00")
+                    tasks_weight_den = Decimal("0.00")
+                    for t_score in task_scores:
+                        tasks_weighted_num += t_score * _PRACTICAL_TASK_DEFAULT_WEIGHT
+                        tasks_weight_den += _PRACTICAL_TASK_DEFAULT_WEIGHT
+
+                    practical_avg: Decimal | None = (
+                        _clamp_grade(tasks_weighted_num / tasks_weight_den)
+                        if tasks_weight_den > Decimal("0.00")
+                        else None
+                    )
+
+                    combined_num = assessments_weighted_num + tasks_weighted_num
+                    combined_den = assessments_weight_den + tasks_weight_den
+                    module_avg: Decimal | None = (
+                        _clamp_grade(combined_num / combined_den)
+                        if combined_den > Decimal("0.00")
+                        else None
+                    )
+
+                    mod_status, _mod_risk, mod_below = classify_academic_standing(
+                        module_avg,
+                        passing_score=mod_passing,
+                        attendance_rate=enrollment.attendance_rate,
+                    )
+
+                    mod_schema = StudentModuleAverageSchema(
+                        module_id=mod.id,
+                        subject_id=subj.id,
+                        module_title=mod.title,
+                        order_index=mod.order_index,
+                        module_weight=mod_weight,
+                        passing_score=mod_passing,
+                        assessments_count=len(grade_entries),
+                        practical_tasks_count=len(task_scores),
+                        assessments_average=assessments_avg,
+                        practical_tasks_average=practical_avg,
+                        module_average=module_avg,
+                        is_below_passing_score=mod_below,
+                        status=mod_status,
+                    )
+                    subj_module_reports.append(mod_schema)
+                    student_modules_flat.append(mod_schema)
+
+                    if module_avg is not None:
+                        subj_weighted_sum += module_avg * mod_weight
+                        subj_weight_total += mod_weight
+                        evaluated_passing_scores.append(mod_passing)
+
+                # Avaliações formativas vinculadas diretamente à disciplina (module_id IS NULL)
+                if requested_module_id is None:
+                    unlinked_entries = unlinked_assessments_by_student_subject.get(
+                        (student.id, subj.id),
+                        [],
+                    )
+                    for eff_grade, a_weight in unlinked_entries:
+                        subj_weighted_sum += eff_grade * a_weight
+                        subj_weight_total += a_weight
+
+                subj_passing = (
+                    _quantize_decimal(
+                        sum(subj_passing_scores, Decimal("0.00"))
+                        / Decimal(len(subj_passing_scores))
+                    )
+                    if subj_passing_scores
+                    else _DEFAULT_PASSING_SCORE
+                )
+                subj_avg: Decimal | None = (
+                    _clamp_grade(subj_weighted_sum / subj_weight_total)
+                    if subj_weight_total > Decimal("0.00")
+                    else None
+                )
+                subj_status, _subj_risk, subj_below = classify_academic_standing(
+                    subj_avg,
+                    passing_score=subj_passing,
+                    attendance_rate=enrollment.attendance_rate,
+                )
+                student_subjects.append(
+                    StudentSubjectAverageSchema(
+                        subject_id=subj.id,
+                        subject_code=subj.code,
+                        subject_name=subj.name,
+                        passing_score=subj_passing,
+                        subject_average=subj_avg,
+                        is_below_passing_score=subj_below,
+                        status=subj_status,
+                        modules=subj_module_reports,
+                    )
+                )
+                if subj_avg is not None:
+                    evaluated_subject_averages.append(subj_avg)
+
+            overall_passing = (
+                _quantize_decimal(
+                    sum(evaluated_passing_scores, Decimal("0.00"))
+                    / Decimal(len(evaluated_passing_scores))
+                )
+                if evaluated_passing_scores
+                else _DEFAULT_PASSING_SCORE
+            )
+            overall_final_grade: Decimal | None = (
+                _clamp_grade(
+                    sum(evaluated_subject_averages, Decimal("0.00"))
+                    / Decimal(len(evaluated_subject_averages))
+                )
+                if evaluated_subject_averages
+                else None
+            )
+
+            overall_status, overall_risk, overall_below = classify_academic_standing(
+                overall_final_grade,
+                passing_score=overall_passing,
+                attendance_rate=enrollment.attendance_rate,
+            )
+            below_passing_modules = sum(
+                1 for mod in student_modules_flat if mod.is_below_passing_score
+            )
+
+            if (
+                persist_to_enrollments
+                and enrollment.status == EnrollmentStatus.ACTIVE
+                and overall_final_grade is not None
+            ):
+                enrollment.final_grade = overall_final_grade
+                enrollment.updated_at = now
+                self._repository.session.add(enrollment)
+                updated_enrollments_count += 1
+
+            if persist_to_enrollments and overall_status in (
+                AcademicStandingStatus.AT_RISK,
+                AcademicStandingStatus.IN_RECOVERY,
+            ):
+                logger.bind(
+                    class_id=str(academic_class.id),
+                    enrollment_id=str(enrollment.id),
+                    student_id=str(student.id),
+                    final_grade=str(overall_final_grade)
+                    if overall_final_grade is not None
+                    else None,
+                    passing_score=str(overall_passing),
+                    standing_status=overall_status.value,
+                    risk_level=overall_risk.value,
+                ).warning(
+                    "Indicador de risco acadêmico acionado no fechamento de médias (hook RiskEngineService BE-032)."
+                )
+
+            all_student_reports.append(
+                StudentClassGradeReportSchema(
+                    enrollment_id=enrollment.id,
+                    student_id=student.id,
+                    enrollment_status=enrollment.status,
+                    student=student_summary,
+                    attendance_rate=enrollment.attendance_rate,
+                    passing_score=overall_passing,
+                    final_grade=overall_final_grade,
+                    is_below_passing_score=overall_below,
+                    status=overall_status,
+                    risk_level=overall_risk,
+                    below_passing_modules_count=below_passing_modules,
+                    subjects=student_subjects,
+                    modules=student_modules_flat,
+                )
+            )
+
+        if persist_to_enrollments and updated_enrollments_count > 0:
+            self._repository.session.commit()
+
+        approved_count = sum(
+            1
+            for item in all_student_reports
+            if item.status == AcademicStandingStatus.APPROVED
+        )
+        in_recovery_count = sum(
+            1
+            for item in all_student_reports
+            if item.status == AcademicStandingStatus.IN_RECOVERY
+        )
+        at_risk_count = sum(
+            1
+            for item in all_student_reports
+            if item.status == AcademicStandingStatus.AT_RISK
+        )
+
+        computed_grades = [
+            item.final_grade
+            for item in all_student_reports
+            if item.final_grade is not None
+        ]
+        class_average_grade = (
+            _clamp_grade(
+                sum(computed_grades, Decimal("0.00")) / Decimal(len(computed_grades))
+            )
+            if computed_grades
+            else None
+        )
+
+        if requested_status is not None:
+            filtered_students = [
+                item for item in all_student_reports if item.status == requested_status
+            ]
+        else:
+            filtered_students = all_student_reports
+
+        if persist_to_enrollments:
+            logger.bind(
+                class_id=str(academic_class.id),
+                actor_id=str(current_user.id),
+                total_students=len(all_student_reports),
+                updated_enrollments_count=updated_enrollments_count,
+                approved_count=approved_count,
+                in_recovery_count=in_recovery_count,
+                at_risk_count=at_risk_count,
+                class_average_grade=str(class_average_grade)
+                if class_average_grade is not None
+                else None,
+            ).info("Médias ponderadas da turma calculadas e consolidadas em enrollments.")
+
+        return ClassGradesSummaryResponseSchema(
+            class_id=academic_class.id,
+            academic_class=EnrollmentClassSummarySchema.model_validate(academic_class),
+            calculated_at=now,
+            persisted_to_enrollments=persist_to_enrollments,
+            updated_enrollments_count=updated_enrollments_count,
+            total_students=len(all_student_reports),
+            approved_count=approved_count,
+            in_recovery_count=in_recovery_count,
+            at_risk_count=at_risk_count,
+            class_average_grade=class_average_grade,
+            students=filtered_students,
+        )
+
+    def calculate_class_averages(
+        self,
+        class_id: UUID,
+        *,
+        current_user: User,
+    ) -> ClassGradesSummaryResponseSchema:
+        """Executa o fechamento de médias ponderadas da turma e atualiza enrollments.final_grade (BE-028)."""
+        return self._build_class_grades_report(
+            class_id,
+            current_user=current_user,
+            persist_to_enrollments=True,
+            params=None,
+        )
+
+    def get_class_grades_summary(
+        self,
+        class_id: UUID,
+        params: ClassGradesSummaryQueryParams | None = None,
+        *,
+        current_user: User,
+    ) -> ClassGradesSummaryResponseSchema:
+        """Retorna o boletim consolidado de médias da turma sem alterar enrollments (BE-028)."""
+        return self._build_class_grades_report(
+            class_id,
+            current_user=current_user,
+            persist_to_enrollments=False,
+            params=params,
+        )
+
 
 def get_academic_assessment_service(
     repository: AcademicAssessmentRepositoryDep,
@@ -471,9 +998,12 @@ __all__ = [
     "ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE",
     "AcademicAssessmentService",
     "AcademicAssessmentServiceDep",
+    "CLASS_AVERAGES_CLOSED_CLASS_MESSAGE",
+    "CLASS_AVERAGES_TEACHER_FORBIDDEN_MESSAGE",
     "GRADE_EXCEEDS_MAX_GRADE_MESSAGE",
     "GRADE_INACTIVE_ENROLLMENT_MESSAGE",
     "GRADE_STUDENT_NOT_ENROLLED_MESSAGE",
+    "classify_academic_standing",
     "compute_senai_effective_grade",
     "get_academic_assessment_service",
 ]
