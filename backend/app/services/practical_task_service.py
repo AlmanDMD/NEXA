@@ -1,5 +1,6 @@
 """Serviço de domínio para Atividades Práticas de Oficina e Critérios de Tolerância (BE-024)."""
 
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Final
 from uuid import UUID
@@ -13,13 +14,18 @@ from app.core.exceptions import (
     UnprocessableEntityException,
 )
 from app.core.logging import logger
-from app.models.practical_task import PracticalTask, TaskCriterion
+from app.models.base import _utc_now
+from app.models.practical_task import PracticalTask, TaskCriterion, TaskSubmission
 from app.models.user import User
 from app.repositories.practical_task_repository import (
     PracticalTaskRepository,
     PracticalTaskRepositoryDep,
 )
-from app.schemas.class_lesson import LessonModuleSummarySchema
+from app.schemas.class_lesson import (
+    LessonModuleSummarySchema,
+    LessonSubjectSummarySchema,
+    StudentAttendanceSummaryStudentSchema,
+)
 from app.schemas.enrollment import EnrollmentClassSummarySchema
 from app.schemas.enums import ClassStatus, EnrollmentStatus, SubmissionStatus, UserRole
 from app.schemas.practical_task import (
@@ -28,6 +34,10 @@ from app.schemas.practical_task import (
     PracticalTaskPaginatedResponseSchema,
     PracticalTaskResponseSchema,
     SkillEvidenceResponseSchema,
+    StudentPendingTaskItemSchema,
+    StudentPendingTasksQueryParams,
+    StudentPendingTasksResponseSchema,
+    StudentTaskCountsSummarySchema,
     SubmissionCriterionEvaluationResponseSchema,
     TaskCriterionCompetencySummarySchema,
     TaskCriterionResponseSchema,
@@ -69,6 +79,19 @@ TASK_EVALUATION_INVALID_CRITERION_MESSAGE: Final[str] = (
 )
 TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE: Final[str] = (
     "Todos os critérios técnicos (rubricas) da atividade prática devem ser avaliados."
+)
+STUDENT_TASKS_NOT_FOUND_MESSAGE: Final[str] = "Estudante não encontrado."
+STUDENT_TASKS_SUBJECT_NOT_FOUND_MESSAGE: Final[str] = (
+    "Disciplina técnica não encontrada."
+)
+STUDENT_TASKS_ENROLLMENT_NOT_FOUND_MESSAGE: Final[str] = (
+    "Matrícula do estudante não encontrada para a turma informada."
+)
+STUDENT_TASKS_IDOR_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso negado: estudantes só podem consultar suas próprias atividades práticas pendentes."
+)
+STUDENT_TASKS_TEACHER_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: professor não leciona em nenhuma turma em que o estudante está matriculado."
 )
 _DECIMAL_QUANTIZER: Final[Decimal] = Decimal("0.01")
 _MAX_RUBRIC_LEVEL: Final[Decimal] = Decimal("5")
@@ -431,6 +454,268 @@ class PracticalTaskService:
             skill_evidences=evidences_response,
         )
 
+    @staticmethod
+    def resolve_effective_submission_status(
+        submission: TaskSubmission,
+        *,
+        due_date: datetime,
+        reference_now: datetime,
+    ) -> SubmissionStatus:
+        """Marca dinamicamente como LATE tarefas com status PENDING cujo due_date expirou (BE-026)."""
+        normalized_due = (
+            due_date.replace(tzinfo=timezone.utc)
+            if due_date.tzinfo is None
+            else due_date.astimezone(timezone.utc)
+        )
+        normalized_now = (
+            reference_now.replace(tzinfo=timezone.utc)
+            if reference_now.tzinfo is None
+            else reference_now.astimezone(timezone.utc)
+        )
+        if submission.status == SubmissionStatus.PENDING and normalized_due < normalized_now:
+            return SubmissionStatus.LATE
+        return submission.status
+
+    @classmethod
+    def _to_student_pending_task_item(
+        cls,
+        submission: TaskSubmission,
+        *,
+        effective_status: SubmissionStatus,
+    ) -> StudentPendingTaskItemSchema:
+        """Converte TaskSubmission + PracticalTask em StudentPendingTaskItemSchema."""
+        task = submission.task
+        module = task.module
+        subject = module.subject
+        passing_score = Decimal(module.passing_score).quantize(_DECIMAL_QUANTIZER)
+        final_score = (
+            Decimal(submission.final_task_score).quantize(_DECIMAL_QUANTIZER)
+            if submission.final_task_score is not None
+            else None
+        )
+        is_approved = (
+            final_score >= passing_score if final_score is not None else None
+        )
+
+        criteria_schemas = [
+            TaskCriterionResponseSchema(
+                id=criterion.id,
+                task_id=criterion.task_id,
+                competency_id=criterion.competency_id,
+                criterion_name=criterion.criterion_name,
+                weight=criterion.weight,
+                min_acceptable_level=criterion.min_acceptable_level,
+                competency=TaskCriterionCompetencySummarySchema(
+                    id=criterion.competency.id,
+                    code=criterion.competency.code,
+                    title=criterion.competency.title,
+                    category=criterion.competency.category,
+                ),
+            )
+            for criterion in task.criteria
+        ]
+
+        evaluations_schemas = [
+            SubmissionCriterionEvaluationResponseSchema(
+                id=ev.id,
+                submission_id=ev.submission_id,
+                criterion_id=ev.criterion_id,
+                criterion_name=ev.criterion.criterion_name,
+                competency_id=ev.criterion.competency_id,
+                competency_code=ev.criterion.competency.code,
+                competency_title=ev.criterion.competency.title,
+                weight=ev.criterion.weight,
+                min_acceptable_level=ev.criterion.min_acceptable_level,
+                achieved_level=ev.achieved_level,
+                meets_min_acceptable_level=(
+                    ev.achieved_level >= ev.criterion.min_acceptable_level
+                ),
+                score_awarded=ev.score_awarded,
+                technical_feedback=ev.technical_feedback,
+                evaluated_at=ev.evaluated_at,
+            )
+            for ev in submission.evaluations
+        ]
+
+        return StudentPendingTaskItemSchema(
+            id=submission.id,
+            submission_id=submission.id,
+            task_id=task.id,
+            student_id=submission.student_id,
+            enrollment_id=submission.enrollment_id,
+            class_id=task.class_id,
+            module_id=task.module_id,
+            subject_id=module.subject_id,
+            title=task.title,
+            description=task.description,
+            blueprint_url=task.blueprint_url,
+            due_date=task.due_date,
+            max_score=task.max_score,
+            passing_score=passing_score,
+            is_mandatory=task.is_mandatory,
+            status=effective_status,
+            persisted_status=submission.status,
+            is_late=(effective_status == SubmissionStatus.LATE),
+            is_completed=effective_status
+            in (SubmissionStatus.SUBMITTED, SubmissionStatus.EVALUATED),
+            final_task_score=final_score,
+            is_approved=is_approved,
+            evidence_url=submission.evidence_url,
+            student_notes=submission.student_notes,
+            completed_at=submission.completed_at,
+            module=LessonModuleSummarySchema.model_validate(module),
+            subject=LessonSubjectSummarySchema.model_validate(subject),
+            academic_class=EnrollmentClassSummarySchema.model_validate(
+                task.academic_class
+            ),
+            criteria=criteria_schemas,
+            evaluations=evaluations_schemas,
+        )
+
+    def list_student_pending_tasks(
+        self,
+        student_id: UUID,
+        params: StudentPendingTasksQueryParams | None = None,
+        *,
+        current_user: User,
+    ) -> StudentPendingTasksResponseSchema:
+        """Lista tarefas práticas do aluno marcando dinamicamente LATE quando PENDING expirou e retornando contadores (BE-026)."""
+        if current_user.role == UserRole.STUDENT and current_user.id != student_id:
+            raise ForbiddenException(message=STUDENT_TASKS_IDOR_FORBIDDEN_MESSAGE)
+
+        student = self._repository.get_user_by_id(student_id)
+        if student is None or student.role != UserRole.STUDENT:
+            raise NotFoundException(message=STUDENT_TASKS_NOT_FOUND_MESSAGE)
+
+        requested_class_id = params.class_id if params is not None else None
+        requested_module_id = params.module_id if params is not None else None
+        requested_subject_id = params.subject_id if params is not None else None
+        requested_status = params.status if params is not None else None
+        requested_is_mandatory = params.is_mandatory if params is not None else None
+        requested_search = params.search if params is not None else None
+
+        if requested_class_id is not None:
+            academic_class = self._repository.get_class_by_id(requested_class_id)
+            if academic_class is None:
+                raise NotFoundException(message=PRACTICAL_TASK_CLASS_NOT_FOUND_MESSAGE)
+            if (
+                current_user.role == UserRole.TEACHER
+                and not self._repository.is_teacher_assigned_to_class(
+                    teacher_id=current_user.id,
+                    class_id=academic_class.id,
+                )
+            ):
+                raise ForbiddenException(message=STUDENT_TASKS_TEACHER_FORBIDDEN_MESSAGE)
+
+        if requested_module_id is not None:
+            module = self._repository.get_module_by_id(requested_module_id)
+            if module is None:
+                raise NotFoundException(message=PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE)
+
+        if requested_subject_id is not None:
+            subject = self._repository.get_subject_by_id(requested_subject_id)
+            if subject is None:
+                raise NotFoundException(message=STUDENT_TASKS_SUBJECT_NOT_FOUND_MESSAGE)
+
+        enrollments = self._repository.list_student_enrollments(
+            student.id,
+            class_id=requested_class_id,
+        )
+        if requested_class_id is not None and not enrollments:
+            raise NotFoundException(message=STUDENT_TASKS_ENROLLMENT_NOT_FOUND_MESSAGE)
+
+        allowed_class_ids: list[UUID] | None = None
+        if current_user.role == UserRole.TEACHER:
+            student_class_ids = [enr.class_id for enr in enrollments]
+            teacher_class_ids = self._repository.get_teacher_assigned_class_ids(
+                current_user.id,
+                class_ids=student_class_ids,
+            )
+            if not teacher_class_ids:
+                raise ForbiddenException(message=STUDENT_TASKS_TEACHER_FORBIDDEN_MESSAGE)
+            allowed_class_ids = list(teacher_class_ids)
+
+        submissions = self._repository.list_student_task_submissions(
+            student.id,
+            allowed_class_ids=allowed_class_ids,
+            class_id=requested_class_id,
+            module_id=requested_module_id,
+            subject_id=requested_subject_id,
+            is_mandatory=requested_is_mandatory,
+            search=requested_search,
+        )
+
+        now = _utc_now()
+        pending_count = 0
+        late_count = 0
+        submitted_count = 0
+        evaluated_count = 0
+        all_items: list[StudentPendingTaskItemSchema] = []
+
+        for sub in submissions:
+            effective_status = self.resolve_effective_submission_status(
+                sub,
+                due_date=sub.task.due_date,
+                reference_now=now,
+            )
+            if effective_status == SubmissionStatus.PENDING:
+                pending_count += 1
+            elif effective_status == SubmissionStatus.LATE:
+                late_count += 1
+            elif effective_status == SubmissionStatus.SUBMITTED:
+                submitted_count += 1
+            elif effective_status == SubmissionStatus.EVALUATED:
+                evaluated_count += 1
+
+            all_items.append(
+                self._to_student_pending_task_item(
+                    sub,
+                    effective_status=effective_status,
+                )
+            )
+
+        completed_count = submitted_count + evaluated_count
+        total_count = pending_count + late_count + completed_count
+
+        if requested_status is not None:
+            filtered_items = [
+                item for item in all_items if item.status == requested_status
+            ]
+        else:
+            filtered_items = all_items
+
+        profile = student.profile
+        student_summary = StudentAttendanceSummaryStudentSchema(
+            id=student.id,
+            email=student.email,
+            full_name=profile.full_name if profile is not None else None,
+            registration_number=(
+                profile.registration_number if profile is not None else None
+            ),
+        )
+        counts_summary = StudentTaskCountsSummarySchema(
+            pending_count=pending_count,
+            late_count=late_count,
+            completed_count=completed_count,
+            submitted_count=submitted_count,
+            evaluated_count=evaluated_count,
+            total_count=total_count,
+        )
+
+        return StudentPendingTasksResponseSchema(
+            student_id=student.id,
+            student=student_summary,
+            pending_count=pending_count,
+            late_count=late_count,
+            completed_count=completed_count,
+            submitted_count=submitted_count,
+            evaluated_count=evaluated_count,
+            total_count=total_count,
+            summary=counts_summary,
+            tasks=filtered_items,
+            data=filtered_items,
+        )
+
 
 def get_practical_task_service(
     repository: PracticalTaskRepositoryDep,
@@ -456,6 +741,11 @@ __all__ = [
     "PRACTICAL_TASK_TEACHER_FORBIDDEN_MESSAGE",
     "PracticalTaskService",
     "PracticalTaskServiceDep",
+    "STUDENT_TASKS_ENROLLMENT_NOT_FOUND_MESSAGE",
+    "STUDENT_TASKS_IDOR_FORBIDDEN_MESSAGE",
+    "STUDENT_TASKS_NOT_FOUND_MESSAGE",
+    "STUDENT_TASKS_SUBJECT_NOT_FOUND_MESSAGE",
+    "STUDENT_TASKS_TEACHER_FORBIDDEN_MESSAGE",
     "TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE",
     "TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE",
     "TASK_EVALUATION_INVALID_CRITERION_MESSAGE",

@@ -24,7 +24,9 @@ from app.models.practical_task import (
     TaskCriterion,
     TaskSubmission,
 )
+from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
+from app.models.user import User
 from app.schemas.enums import EnrollmentStatus, SubmissionStatus
 
 
@@ -399,6 +401,140 @@ class PracticalTaskRepository:
             )
             or submission
         )
+
+    def get_user_by_id(self, user_id: UUID) -> User | None:
+        """Busca um usuário pelo UUID com seu perfil carregado."""
+        stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(User.id == user_id)
+        )
+        return self._session.scalar(stmt)
+
+    def get_subject_by_id(self, subject_id: UUID) -> Subject | None:
+        """Busca uma disciplina técnica pelo UUID."""
+        stmt = select(Subject).where(Subject.id == subject_id)
+        return self._session.scalar(stmt)
+
+    def is_teacher_assigned_to_class(
+        self,
+        *,
+        teacher_id: UUID,
+        class_id: UUID,
+    ) -> bool:
+        """Verifica se o docente leciona ao menos uma disciplina na turma informada."""
+        stmt = (
+            select(TeacherAssignment.id)
+            .where(
+                TeacherAssignment.teacher_id == teacher_id,
+                TeacherAssignment.class_id == class_id,
+            )
+            .limit(1)
+        )
+        return self._session.scalar(stmt) is not None
+
+    def get_teacher_assigned_class_ids(
+        self,
+        teacher_id: UUID,
+        *,
+        class_ids: Sequence[UUID] | None = None,
+    ) -> set[UUID]:
+        """Retorna os UUIDs das turmas em que o docente possui atribuição ativa."""
+        stmt = select(TeacherAssignment.class_id).where(
+            TeacherAssignment.teacher_id == teacher_id
+        )
+        if class_ids is not None:
+            target_ids = list(dict.fromkeys(class_ids))
+            if not target_ids:
+                return set()
+            stmt = stmt.where(TeacherAssignment.class_id.in_(target_ids))
+        return set(self._session.scalars(stmt).all())
+
+    def list_student_enrollments(
+        self,
+        student_id: UUID,
+        *,
+        class_id: UUID | None = None,
+    ) -> list[Enrollment]:
+        """Lista matrículas do estudante na(s) turma(s)."""
+        stmt = (
+            select(Enrollment)
+            .options(joinedload(Enrollment.academic_class).joinedload(AcademicClass.course))
+            .where(Enrollment.student_id == student_id)
+        )
+        if class_id is not None:
+            stmt = stmt.where(Enrollment.class_id == class_id)
+        stmt = stmt.order_by(
+            Enrollment.enrollment_date.desc(),
+            Enrollment.created_at.desc(),
+            Enrollment.id.asc(),
+        )
+        return list(self._session.scalars(stmt).all())
+
+    def list_student_task_submissions(
+        self,
+        student_id: UUID,
+        *,
+        allowed_class_ids: Sequence[UUID] | None = None,
+        class_id: UUID | None = None,
+        module_id: UUID | None = None,
+        subject_id: UUID | None = None,
+        is_mandatory: bool | None = None,
+        search: str | None = None,
+    ) -> list[TaskSubmission]:
+        """Lista submissões práticas de um estudante cruzando com practical_tasks e learning_modules ordenadas por due_date."""
+        stmt = (
+            select(TaskSubmission)
+            .join(PracticalTask, PracticalTask.id == TaskSubmission.task_id)
+            .join(LearningModule, LearningModule.id == PracticalTask.module_id)
+            .options(
+                joinedload(TaskSubmission.task)
+                .joinedload(PracticalTask.module)
+                .joinedload(LearningModule.subject),
+                joinedload(TaskSubmission.task).joinedload(PracticalTask.academic_class),
+                joinedload(TaskSubmission.task)
+                .selectinload(PracticalTask.criteria)
+                .joinedload(TaskCriterion.competency),
+                selectinload(TaskSubmission.evaluations)
+                .joinedload(SubmissionEvaluation.criterion)
+                .joinedload(TaskCriterion.competency),
+            )
+            .where(TaskSubmission.student_id == student_id)
+        )
+
+        if allowed_class_ids is not None:
+            allowed_list = list(dict.fromkeys(allowed_class_ids))
+            if not allowed_list:
+                return []
+            stmt = stmt.where(PracticalTask.class_id.in_(allowed_list))
+
+        if class_id is not None:
+            stmt = stmt.where(PracticalTask.class_id == class_id)
+
+        if module_id is not None:
+            stmt = stmt.where(PracticalTask.module_id == module_id)
+
+        if subject_id is not None:
+            stmt = stmt.where(LearningModule.subject_id == subject_id)
+
+        if is_mandatory is not None:
+            stmt = stmt.where(PracticalTask.is_mandatory == is_mandatory)
+
+        if search:
+            pattern = _build_ilike_pattern(search)
+            stmt = stmt.where(
+                or_(
+                    PracticalTask.title.ilike(pattern, escape="\\"),
+                    PracticalTask.description.ilike(pattern, escape="\\"),
+                )
+            )
+
+        stmt = stmt.order_by(
+            PracticalTask.due_date.asc(),
+            PracticalTask.created_at.asc(),
+            TaskSubmission.id.asc(),
+        )
+        return list(self._session.scalars(stmt).unique().all())
 
 
 def get_practical_task_repository(session: DbSessionDep) -> PracticalTaskRepository:

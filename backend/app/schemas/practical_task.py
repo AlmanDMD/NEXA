@@ -11,7 +11,11 @@ from pydantic import AliasChoices, BeforeValidator, Field, field_validator, mode
 from pydantic_core import PydanticCustomError
 
 from app.schemas.base import BaseResponseSchema, EntityResponseSchema, StrictRequestSchema
-from app.schemas.class_lesson import LessonModuleSummarySchema
+from app.schemas.class_lesson import (
+    LessonModuleSummarySchema,
+    LessonSubjectSummarySchema,
+    StudentAttendanceSummaryStudentSchema,
+)
 from app.schemas.competency import (
     CompetencyWeightDecimal,
     RequiredLevelInt,
@@ -612,6 +616,236 @@ class TaskEvaluationResponseSchema(BaseResponseSchema):
         return value.quantize(_DECIMAL_QUANTIZER)
 
 
+class StudentPendingTasksQueryParams(StrictRequestSchema):
+    """Filtros opcionais para consulta de tarefas práticas do estudante (GET /api/v1/students/{id}/pending-tasks)."""
+
+    status: SubmissionStatus | None = Field(
+        default=None,
+        description="Filtro opcional pelo status efetivo da entrega (PENDING, LATE, SUBMITTED, EVALUATED)",
+        examples=[SubmissionStatus.PENDING],
+    )
+    module_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID do módulo de aprendizagem prática (learning_modules)",
+    )
+    subject_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da disciplina técnica",
+    )
+    class_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da turma acadêmica",
+    )
+    is_mandatory: bool | None = Field(
+        default=None,
+        description="Filtro opcional por obrigatoriedade da atividade prática",
+    )
+    search: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Busca textual opcional por título ou descrição da atividade prática",
+    )
+
+    @field_validator("search", mode="before")
+    @classmethod
+    def sanitize_search_term(cls, value: Any) -> str | None:
+        cleaned = sanitize_optional_text(value, collapse_spaces=True)
+        if cleaned is not None and len(cleaned) > 100:
+            raise PydanticCustomError(
+                "search_too_long",
+                "O termo de busca deve ter no máximo 100 caracteres.",
+            )
+        return cleaned
+
+
+type StudentPendingTasksQueryParamsDep = Annotated[
+    StudentPendingTasksQueryParams,
+    Query(),
+]
+
+
+class StudentTaskCountsSummarySchema(BaseResponseSchema):
+    """Resumo de contadores de tarefas práticas pendentes, atrasadas e concluídas do estudante."""
+
+    pending_count: int = Field(
+        ge=0,
+        description="Quantidade de tarefas práticas pendentes dentro do prazo (PENDING)",
+    )
+    late_count: int = Field(
+        ge=0,
+        description="Quantidade de tarefas práticas pendentes em atraso com due_date expirado (LATE)",
+    )
+    completed_count: int = Field(
+        ge=0,
+        description="Quantidade de tarefas práticas concluídas ou avaliadas (SUBMITTED + EVALUATED)",
+    )
+    submitted_count: int = Field(
+        default=0,
+        ge=0,
+        description="Quantidade de tarefas práticas entregues aguardando avaliação (SUBMITTED)",
+    )
+    evaluated_count: int = Field(
+        default=0,
+        ge=0,
+        description="Quantidade de tarefas práticas já avaliadas pelo docente (EVALUATED)",
+    )
+    total_count: int = Field(
+        ge=0,
+        description="Total geral de tarefas práticas atribuídas ao estudante",
+    )
+
+
+class StudentPendingTaskItemSchema(BaseResponseSchema):
+    """Item detalhado de atividade prática e respectiva submissão do estudante (BE-026)."""
+
+    id: UUID = Field(
+        description="Identificador UUID da submissão (task_submissions.id)",
+    )
+    submission_id: UUID = Field(
+        description="Identificador UUID da submissão prática do estudante",
+    )
+    task_id: UUID = Field(
+        description="Identificador UUID da atividade prática (practical_tasks.id)",
+    )
+    student_id: UUID = Field(description="Identificador UUID do estudante")
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula na turma")
+    class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
+    module_id: UUID = Field(
+        description="Identificador UUID do módulo de aprendizagem prática",
+    )
+    subject_id: UUID = Field(description="Identificador UUID da disciplina técnica")
+    title: str = Field(description="Título da atividade prática de oficina")
+    description: str | None = Field(
+        default=None,
+        description="Instruções técnicas da atividade prática",
+    )
+    blueprint_url: str | None = Field(
+        default=None,
+        description="URL opcional do desenho técnico / folha de processo",
+    )
+    due_date: datetime = Field(
+        description="Prazo limite de entrega da atividade prática (UTC ISO-8601)",
+    )
+    max_score: Decimal = Field(
+        description="Pontuação máxima da atividade prática (1.00 a 10.00)",
+    )
+    passing_score: Decimal = Field(
+        description="Nota mínima de corte do módulo prático para aprovação",
+    )
+    is_mandatory: bool = Field(
+        description="Indica se a entrega da atividade prática é obrigatória",
+    )
+    status: SubmissionStatus = Field(
+        description="Status efetivo da tarefa para o estudante (dinamicamente LATE quando PENDING e due_date expirou)",
+    )
+    persisted_status: SubmissionStatus = Field(
+        description="Status original armazenado em task_submissions no banco de dados",
+    )
+    is_late: bool = Field(
+        description="Indica se a tarefa está em atraso (status efetivo LATE)",
+    )
+    is_completed: bool = Field(
+        description="Indica se a tarefa já foi concluída ou avaliada (SUBMITTED ou EVALUATED)",
+    )
+    final_task_score: Decimal | None = Field(
+        default=None,
+        description="Nota final ponderada atribuída pelo docente (quando avaliada)",
+    )
+    is_approved: bool | None = Field(
+        default=None,
+        description="Indica se final_task_score atingiu a nota de corte do módulo (quando avaliada)",
+    )
+    evidence_url: str | None = Field(
+        default=None,
+        description="URL opcional da evidência de entrega",
+    )
+    student_notes: str | None = Field(
+        default=None,
+        description="Observações opcionais registradas na entrega",
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        description="Data/hora de conclusão ou avaliação da tarefa prática",
+    )
+    module: LessonModuleSummarySchema = Field(
+        description="Resumo do módulo de aprendizagem prática",
+    )
+    subject: LessonSubjectSummarySchema = Field(
+        description="Resumo da disciplina técnica vinculada ao módulo",
+    )
+    academic_class: EnrollmentClassSummarySchema = Field(
+        description="Resumo da turma acadêmica",
+    )
+    criteria: list[TaskCriterionResponseSchema] = Field(
+        default_factory=list,
+        description="Critérios técnicos / rubricas de tolerância da atividade prática",
+    )
+    evaluations: list[SubmissionCriterionEvaluationResponseSchema] = Field(
+        default_factory=list,
+        description="Avaliações por rubrica registradas pelo docente (quando avaliada)",
+    )
+
+    @field_validator("max_score", "passing_score", mode="after")
+    @classmethod
+    def quantize_required_decimals(cls, value: Decimal) -> Decimal:
+        """Padroniza max_score e passing_score com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+    @field_validator("final_task_score", mode="after")
+    @classmethod
+    def quantize_optional_score(cls, value: Decimal | None) -> Decimal | None:
+        """Padroniza final_task_score com duas casas decimais quando presente."""
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class StudentPendingTasksResponseSchema(BaseResponseSchema):
+    """Resposta consolidada de tarefas práticas pendentes, em atraso e concluídas do estudante (BE-026)."""
+
+    student_id: UUID = Field(description="Identificador UUID do estudante consultado")
+    student: StudentAttendanceSummaryStudentSchema = Field(
+        description="Dados cadastrais resumidos do estudante",
+    )
+    pending_count: int = Field(
+        ge=0,
+        description="Total de tarefas práticas pendentes no prazo (PENDING)",
+    )
+    late_count: int = Field(
+        ge=0,
+        description="Total de tarefas práticas em atraso (LATE, incluindo PENDING com due_date expirado)",
+    )
+    completed_count: int = Field(
+        ge=0,
+        description="Total de tarefas práticas concluídas ou avaliadas (SUBMITTED + EVALUATED)",
+    )
+    submitted_count: int = Field(
+        default=0,
+        ge=0,
+        description="Total de tarefas práticas entregues aguardando avaliação (SUBMITTED)",
+    )
+    evaluated_count: int = Field(
+        default=0,
+        ge=0,
+        description="Total de tarefas práticas avaliadas pelo docente (EVALUATED)",
+    )
+    total_count: int = Field(
+        ge=0,
+        description="Soma total de tarefas práticas do estudante (pending_count + late_count + completed_count)",
+    )
+    summary: StudentTaskCountsSummarySchema = Field(
+        description="Objeto resumido com os contadores { pending_count, late_count, completed_count }",
+    )
+    tasks: list[StudentPendingTaskItemSchema] = Field(
+        default_factory=list,
+        description="Lista de tarefas práticas do estudante ordenadas por prazo de entrega (due_date ascendente)",
+    )
+    data: list[StudentPendingTaskItemSchema] = Field(
+        default_factory=list,
+        description="Alias compatível com envelopes de listagem para a lista de tarefas ordenadas por due_date",
+    )
+
+
 __all__ = [
     "CriterionEvaluationInputSchema",
     "OptionalBlueprintUrlStr",
@@ -625,6 +859,11 @@ __all__ = [
     "PracticalTaskResponseSchema",
     "PracticalTaskTitleStr",
     "SkillEvidenceResponseSchema",
+    "StudentPendingTaskItemSchema",
+    "StudentPendingTasksQueryParams",
+    "StudentPendingTasksQueryParamsDep",
+    "StudentPendingTasksResponseSchema",
+    "StudentTaskCountsSummarySchema",
     "SubmissionCriterionEvaluationResponseSchema",
     "TaskCriterionCompetencySummarySchema",
     "TaskCriterionCreateItemSchema",
