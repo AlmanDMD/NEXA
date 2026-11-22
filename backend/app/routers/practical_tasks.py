@@ -13,6 +13,8 @@ from app.schemas.practical_task import (
     PracticalTaskListParamsDep,
     PracticalTaskPaginatedResponseSchema,
     PracticalTaskResponseSchema,
+    StudentPendingTasksQueryParamsDep,
+    StudentPendingTasksResponseSchema,
     TaskEvaluationRequestSchema,
     TaskEvaluationResponseSchema,
 )
@@ -90,6 +92,36 @@ async def evaluate_practical_task(
     return task_service.evaluate_practical_task(
         task_id,
         payload,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/students/{student_id}/pending-tasks",
+    response_model=StudentPendingTasksResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Listar tarefas práticas pendentes, em atraso e concluídas de um estudante",
+)
+async def list_student_pending_tasks(
+    student_id: UUIDPathParam,
+    params: StudentPendingTasksQueryParamsDep,
+    task_service: PracticalTaskServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(
+            require_role(
+                UserRole.ADMIN,
+                UserRole.COORDINATOR,
+                UserRole.TEACHER,
+                UserRole.STUDENT,
+            )
+        ),
+    ],
+) -> StudentPendingTasksResponseSchema:
+    """Consulta submissões práticas do aluno marcando dinamicamente LATE quando due_date expirou."""
+    return task_service.list_student_pending_tasks(
+        student_id,
+        params,
         current_user=current_user,
     )
 
