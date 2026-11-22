@@ -17,6 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core import (
+    CLASS_PERIOD_CLOSED_ERROR_CODE,
+    CLASS_PERIOD_CLOSED_MESSAGE,
     PasswordHasher,
     create_access_token,
     get_db,
@@ -1405,13 +1407,14 @@ async def test_class_averages_rbac_closed_class_and_not_found(
     assert res_404.status_code == status.HTTP_404_NOT_FOUND
     assert res_404.json()["message"] == ASSESSMENT_CLASS_NOT_FOUND_MESSAGE
 
-    # 4. POST calculate-averages em turma COMPLETED -> 422, mas GET grades-summary -> 200 OK
+    # 4. POST calculate-averages em turma COMPLETED -> 422 com CLASS_PERIOD_CLOSED (BE-029), mas GET grades-summary -> 200 OK
     res_closed_post = await assessments_client.post(
         f"/api/v1/classes/{closed_class.id}/calculate-averages",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert res_closed_post.status_code == 422
-    assert res_closed_post.json()["message"] == CLASS_AVERAGES_CLOSED_CLASS_MESSAGE
+    assert res_closed_post.json()["error"] == CLASS_PERIOD_CLOSED_ERROR_CODE
+    assert res_closed_post.json()["message"] == CLASS_PERIOD_CLOSED_MESSAGE
 
     res_closed_get = await assessments_client.get(
         f"/api/v1/classes/{closed_class.id}/grades-summary",
