@@ -73,6 +73,11 @@ from app.services.practical_task_service import (
     PRACTICAL_TASK_MODULE_TEACHER_FORBIDDEN_MESSAGE,
     PRACTICAL_TASK_NOT_FOUND_MESSAGE,
     PRACTICAL_TASK_TEACHER_FORBIDDEN_MESSAGE,
+    STUDENT_TASKS_ENROLLMENT_NOT_FOUND_MESSAGE,
+    STUDENT_TASKS_IDOR_FORBIDDEN_MESSAGE,
+    STUDENT_TASKS_NOT_FOUND_MESSAGE,
+    STUDENT_TASKS_SUBJECT_NOT_FOUND_MESSAGE,
+    STUDENT_TASKS_TEACHER_FORBIDDEN_MESSAGE,
     TASK_EVALUATION_INACTIVE_ENROLLMENT_MESSAGE,
     TASK_EVALUATION_INCOMPLETE_CRITERIA_MESSAGE,
     TASK_EVALUATION_INVALID_CRITERION_MESSAGE,
@@ -1282,4 +1287,534 @@ async def test_evaluate_practical_task_rejects_client_score_manipulation_invalid
     )
     assert res_404.status_code == status.HTTP_404_NOT_FOUND
     assert res_404.json()["message"] == PRACTICAL_TASK_NOT_FOUND_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_list_student_pending_tasks_dynamic_late_counts_sorting_and_filters(
+    tasks_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida GET /api/v1/students/{id}/pending-tasks: LATE dinâmico, contadores resumidos, ordenação por due_date e filtros (BE-026)."""
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="pend026",
+        full_name="Instrutor Oficina",
+        registration_number="SENAI-PRF-0260",
+    )
+    student, student_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stupend026",
+        full_name="Mariana Costa",
+        registration_number="SENAI-ALU-0261",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-USI-026",
+            name="Técnico em Usinagem Mecânica",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="USI-2026-026",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        subject_tor = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-026",
+            name="Tornearia Mecânica",
+            workload_hours=80,
+            syllabus="Torneamento",
+            is_active=True,
+        )
+        subject_fre = SubjectRepository(session).create(
+            course_id=course.id,
+            code="FRE-026",
+            name="Fresamento Universal",
+            workload_hours=80,
+            syllabus="Fresamento",
+            is_active=True,
+        )
+        mod_tor = LearningModuleRepository(session).create(
+            subject_id=subject_tor.id,
+            title="Tornearia Cilíndrica",
+            order_index=1,
+            practical_hours=40,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        mod_fre = LearningModuleRepository(session).create(
+            subject_id=subject_fre.id,
+            title="Fresamento de Rasgos e Chavetas",
+            order_index=1,
+            practical_hours=40,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp = CompetencyRepository(session).create(
+            code="COMP-DIM-026",
+            title="Controle Dimensional de Bancada",
+            category=CompetencyCategory.TECHNICAL,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subject_tor.id,
+                    is_main_teacher=True,
+                ),
+                TeacherAssignment(
+                    teacher_id=teacher.id,
+                    class_id=academic_class.id,
+                    subject_id=subject_fre.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+        session.commit()
+
+    # Cria 4 atividades práticas fora de ordem cronológica para validar ordenação por due_date ascendente:
+    # 1) Tarefa com due_date no passado (2020-03-10) e status PENDING no banco -> deve virar LATE dinamicamente
+    # 2) Tarefa com due_date no passado (2020-02-15) que será avaliada pelo docente -> status EVALUATED (completed)
+    # 3) Tarefa com due_date no futuro (2030-05-20) que será marcada como SUBMITTED -> status SUBMITTED (completed)
+    # 4) Tarefa com due_date no futuro (2030-04-10) e status PENDING -> permanece PENDING
+    res_late = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(mod_tor.id),
+            "class_id": str(academic_class.id),
+            "title": "Peça 02 - Eixo com Prazo Expirado",
+            "due_date": "2020-03-10T18:00:00Z",
+            "is_mandatory": True,
+            "criteria": [
+                {
+                    "competency_id": str(comp.id),
+                    "criterion_name": "Tolerância Externa H7",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_late.status_code == status.HTTP_201_CREATED
+    task_late_id = UUID(res_late.json()["id"])
+
+    res_eval_task = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(mod_tor.id),
+            "class_id": str(academic_class.id),
+            "title": "Peça 01 - Bucha Avaliada",
+            "due_date": "2020-02-15T18:00:00Z",
+            "is_mandatory": True,
+            "criteria": [
+                {
+                    "competency_id": str(comp.id),
+                    "criterion_name": "Diâmetro Interno H7",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_eval_task.status_code == status.HTTP_201_CREATED
+    task_eval_data = res_eval_task.json()
+    task_eval_id = UUID(task_eval_data["id"])
+    crit_eval_id = UUID(task_eval_data["criteria"][0]["id"])
+
+    # Avalia a Peça 01 (status -> EVALUATED)
+    eval_res = await tasks_client.post(
+        f"/api/v1/tasks/{task_eval_id}/evaluations",
+        json={
+            "student_id": str(student.id),
+            "status": "EVALUATED",
+            "evaluations": [{"criterion_id": str(crit_eval_id), "achieved_level": 4}],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert eval_res.status_code == status.HTTP_200_OK
+
+    res_sub_task = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(mod_fre.id),
+            "class_id": str(academic_class.id),
+            "title": "Peça 04 - Chaveta Entregue",
+            "due_date": "2030-05-20T18:00:00Z",
+            "is_mandatory": False,
+            "criteria": [
+                {
+                    "competency_id": str(comp.id),
+                    "criterion_name": "Largura do Rasgo de Chaveta",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_sub_task.status_code == status.HTTP_201_CREATED
+    task_sub_id = UUID(res_sub_task.json()["id"])
+
+    # Atualiza a submissão da Peça 04 para SUBMITTED no banco
+    with db_session_factory() as session:
+        sub_row = session.scalar(
+            select(TaskSubmission).where(
+                TaskSubmission.task_id == task_sub_id,
+                TaskSubmission.student_id == student.id,
+            )
+        )
+        assert sub_row is not None
+        sub_row.status = SubmissionStatus.SUBMITTED
+        sub_row.completed_at = datetime(2026, 4, 1, 14, 0, tzinfo=timezone.utc)
+        session.add(sub_row)
+        session.commit()
+
+    res_pend_task = await tasks_client.post(
+        "/api/v1/practical-tasks",
+        json={
+            "module_id": str(mod_fre.id),
+            "class_id": str(academic_class.id),
+            "title": "Peça 03 - Engrenagem Pendente no Prazo",
+            "due_date": "2030-04-10T18:00:00Z",
+            "is_mandatory": True,
+            "criteria": [
+                {
+                    "competency_id": str(comp.id),
+                    "criterion_name": "Passo Circular da Engrenagem",
+                    "weight": "1.00",
+                    "min_acceptable_level": 3,
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert res_pend_task.status_code == status.HTTP_201_CREATED
+    task_pend_id = UUID(res_pend_task.json()["id"])
+
+    # 1. Estudante consulta todas as suas tarefas (GET /api/v1/students/{id}/pending-tasks)
+    res_all = await tasks_client.get(
+        f"/api/v1/students/{student.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert res_all.status_code == status.HTTP_200_OK
+    body = res_all.json()
+
+    assert body["student_id"] == str(student.id)
+    assert body["student"]["full_name"] == "Mariana Costa"
+    assert body["pending_count"] == 1
+    assert body["late_count"] == 1
+    assert body["completed_count"] == 2
+    assert body["submitted_count"] == 1
+    assert body["evaluated_count"] == 1
+    assert body["total_count"] == 4
+    assert body["summary"] == {
+        "pending_count": 1,
+        "late_count": 1,
+        "completed_count": 2,
+        "submitted_count": 1,
+        "evaluated_count": 1,
+        "total_count": 4,
+    }
+
+    # Lista ordenada por due_date ascendente: Peça 01 (2020-02-15), Peça 02 (2020-03-10), Peça 03 (2030-04-10), Peça 04 (2030-05-20)
+    tasks_list = body["tasks"]
+    assert len(tasks_list) == 4
+    assert [item["task_id"] for item in tasks_list] == [
+        str(task_eval_id),
+        str(task_late_id),
+        str(task_pend_id),
+        str(task_sub_id),
+    ]
+
+    # Verifica marcação dinâmica LATE na Peça 02 (persisted_status=PENDING -> status=LATE)
+    late_item = tasks_list[1]
+    assert late_item["title"] == "Peça 02 - Eixo com Prazo Expirado"
+    assert late_item["persisted_status"] == SubmissionStatus.PENDING.value
+    assert late_item["status"] == SubmissionStatus.LATE.value
+    assert late_item["is_late"] is True
+    assert late_item["is_completed"] is False
+
+    # Verifica Peça 01 avaliada (EVALUATED)
+    eval_item = tasks_list[0]
+    assert eval_item["status"] == SubmissionStatus.EVALUATED.value
+    assert eval_item["is_late"] is False
+    assert eval_item["is_completed"] is True
+    assert eval_item["final_task_score"] == "8.00"
+    assert eval_item["is_approved"] is True
+    assert len(eval_item["evaluations"]) == 1
+
+    # 2. Filtro por status=LATE retorna apenas a tarefa expirada mantendo os contadores do contexto
+    res_filter_late = await tasks_client.get(
+        f"/api/v1/students/{student.id}/pending-tasks?status=LATE",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert res_filter_late.status_code == status.HTTP_200_OK
+    late_body = res_filter_late.json()
+    assert len(late_body["tasks"]) == 1
+    assert late_body["tasks"][0]["task_id"] == str(task_late_id)
+    assert late_body["tasks"][0]["status"] == SubmissionStatus.LATE.value
+    assert late_body["late_count"] == 1
+    assert late_body["pending_count"] == 1
+    assert late_body["completed_count"] == 2
+
+    # 3. Filtro por status=PENDING retorna apenas a tarefa dentro do prazo (não inclui a expirada)
+    res_filter_pending = await tasks_client.get(
+        f"/api/v1/students/{student.id}/pending-tasks?status=PENDING",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert res_filter_pending.status_code == status.HTTP_200_OK
+    pending_body = res_filter_pending.json()
+    assert len(pending_body["tasks"]) == 1
+    assert pending_body["tasks"][0]["task_id"] == str(task_pend_id)
+    assert pending_body["tasks"][0]["status"] == SubmissionStatus.PENDING.value
+
+    # 4. Filtro por module_id (mod_fre -> Peça 03 PENDING e Peça 04 SUBMITTED)
+    res_filter_mod = await tasks_client.get(
+        f"/api/v1/students/{student.id}/pending-tasks?module_id={mod_fre.id}",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert res_filter_mod.status_code == status.HTTP_200_OK
+    mod_body = res_filter_mod.json()
+    assert mod_body["pending_count"] == 1
+    assert mod_body["late_count"] == 0
+    assert mod_body["completed_count"] == 1
+    assert [item["task_id"] for item in mod_body["tasks"]] == [
+        str(task_pend_id),
+        str(task_sub_id),
+    ]
+
+    # 5. Filtro combinado por module_id + status=SUBMITTED
+    res_filter_mod_sub = await tasks_client.get(
+        f"/api/v1/students/{student.id}/pending-tasks?module_id={mod_fre.id}&status=SUBMITTED",
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert res_filter_mod_sub.status_code == status.HTTP_200_OK
+    assert len(res_filter_mod_sub.json()["tasks"]) == 1
+    assert res_filter_mod_sub.json()["tasks"][0]["task_id"] == str(task_sub_id)
+
+
+@pytest.mark.asyncio
+async def test_list_student_pending_tasks_idor_isolation_rbac_and_not_found(
+    tasks_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida isolamento de segurança IDOR (estudante só acessa suas próprias pendências), RBAC docente e 404 (BE-026)."""
+    admin, admin_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.ADMIN,
+        suffix="admpend026",
+    )
+    _coord, coord_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.COORDINATOR,
+        suffix="crdpend026",
+    )
+    assigned_teacher, assigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchr_a_026",
+    )
+    unassigned_teacher, unassigned_teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="tchr_b_026",
+    )
+    student_a, student_a_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stua_026",
+    )
+    student_b, _student_b_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="stub_026",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-AUT-026",
+            name="Técnico em Automação Industrial",
+            description="Curso técnico",
+            total_hours=1200,
+            is_active=True,
+        )
+        class_a = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="AUT-2026-1A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        class_b = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="AUT-2026-1B",
+            period="2026.1",
+            shift=Shift.AFTERNOON,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="CLP-026",
+            name="Programação de CLP",
+            workload_hours=60,
+            syllabus="Ladder",
+            is_active=True,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=assigned_teacher.id,
+                    class_id=class_a.id,
+                    subject_id=subject.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student_a.id,
+                    class_id=class_a.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=student_b.id,
+                    class_id=class_b.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+        session.commit()
+
+    # 1. Sem token -> HTTP 401
+    res_unauth = await tasks_client.get(f"/api/v1/students/{student_a.id}/pending-tasks")
+    assert res_unauth.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # 2. Isolamento IDOR: Estudante A tentando acessar pendências do Estudante B ou UUID aleatório -> HTTP 403
+    res_idor_peer = await tasks_client.get(
+        f"/api/v1/students/{student_b.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {student_a_token}"},
+    )
+    assert res_idor_peer.status_code == status.HTTP_403_FORBIDDEN
+    assert res_idor_peer.json()["message"] == STUDENT_TASKS_IDOR_FORBIDDEN_MESSAGE
+
+    res_idor_random = await tasks_client.get(
+        f"/api/v1/students/{uuid4()}/pending-tasks",
+        headers={"Authorization": f"Bearer {student_a_token}"},
+    )
+    assert res_idor_random.status_code == status.HTTP_403_FORBIDDEN
+    assert res_idor_random.json()["message"] == STUDENT_TASKS_IDOR_FORBIDDEN_MESSAGE
+
+    # 3. Estudante A acessando suas próprias pendências -> HTTP 200 OK
+    res_self = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {student_a_token}"},
+    )
+    assert res_self.status_code == status.HTTP_200_OK
+    assert res_self.json()["student_id"] == str(student_a.id)
+
+    # 4. Docente alocado à turma do Estudante A -> HTTP 200 OK; mas tentando acessar Estudante B -> HTTP 403
+    res_teacher_ok = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert res_teacher_ok.status_code == status.HTTP_200_OK
+
+    res_teacher_other = await tasks_client.get(
+        f"/api/v1/students/{student_b.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {assigned_teacher_token}"},
+    )
+    assert res_teacher_other.status_code == status.HTTP_403_FORBIDDEN
+    assert res_teacher_other.json()["message"] == STUDENT_TASKS_TEACHER_FORBIDDEN_MESSAGE
+
+    res_unassigned_teacher = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {unassigned_teacher_token}"},
+    )
+    assert res_unassigned_teacher.status_code == status.HTTP_403_FORBIDDEN
+
+    # 5. Coordenador e Admin acessam qualquer estudante -> HTTP 200 OK
+    for priv_tok in (coord_token, admin_token):
+        res_priv = await tasks_client.get(
+            f"/api/v1/students/{student_b.id}/pending-tasks",
+            headers={"Authorization": f"Bearer {priv_tok}"},
+        )
+        assert res_priv.status_code == status.HTTP_200_OK
+
+    # 6. Erros 404: estudante inexistente, usuário que não é STUDENT, module_id/subject_id/class_id inexistentes ou turma sem matrícula
+    res_no_stu = await tasks_client.get(
+        f"/api/v1/students/{uuid4()}/pending-tasks",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_no_stu.status_code == status.HTTP_404_NOT_FOUND
+    assert res_no_stu.json()["message"] == STUDENT_TASKS_NOT_FOUND_MESSAGE
+
+    res_non_stu = await tasks_client.get(
+        f"/api/v1/students/{assigned_teacher.id}/pending-tasks",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_non_stu.status_code == status.HTTP_404_NOT_FOUND
+    assert res_non_stu.json()["message"] == STUDENT_TASKS_NOT_FOUND_MESSAGE
+
+    res_no_mod = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks?module_id={uuid4()}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_no_mod.status_code == status.HTTP_404_NOT_FOUND
+    assert res_no_mod.json()["message"] == PRACTICAL_TASK_MODULE_NOT_FOUND_MESSAGE
+
+    res_no_subj = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks?subject_id={uuid4()}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_no_subj.status_code == status.HTTP_404_NOT_FOUND
+    assert res_no_subj.json()["message"] == STUDENT_TASKS_SUBJECT_NOT_FOUND_MESSAGE
+
+    res_no_cls = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks?class_id={uuid4()}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_no_cls.status_code == status.HTTP_404_NOT_FOUND
+    assert res_no_cls.json()["message"] == PRACTICAL_TASK_CLASS_NOT_FOUND_MESSAGE
+
+    res_unenrolled_cls = await tasks_client.get(
+        f"/api/v1/students/{student_a.id}/pending-tasks?class_id={class_b.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res_unenrolled_cls.status_code == status.HTTP_404_NOT_FOUND
+    assert res_unenrolled_cls.json()["message"] == STUDENT_TASKS_ENROLLMENT_NOT_FOUND_MESSAGE
+
 
