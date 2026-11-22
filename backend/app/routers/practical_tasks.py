@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from app.core.class_period_guard import check_class_is_active
 from app.core.security import require_role
 from app.models.user import User
 from app.schemas.base import UUIDPathParam
@@ -39,6 +40,7 @@ async def create_practical_task(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("body_class_id"))] = None,
 ) -> PracticalTaskResponseSchema:
     """Cria tarefa prática validando competências e gera registros PENDING em task_submissions."""
     return task_service.create_practical_task(payload, current_user=current_user)
@@ -87,6 +89,7 @@ async def evaluate_practical_task(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("task_id"))] = None,
 ) -> TaskEvaluationResponseSchema:
     """Calcula a nota ponderada a partir das rubricas, atualiza task_submissions e grava skill_evidences."""
     return task_service.evaluate_practical_task(

@@ -333,11 +333,39 @@ def _classify_integrity_error(exc: IntegrityError) -> tuple[int, str, str]:
     )
 
 
+def _is_closed_class_trigger_error(exc: SQLAlchemyError) -> bool:
+    """Detecta erro lançado pela trigger de banco fn_prevent_closed_class_mutation (DB-029)."""
+    orig = getattr(exc, "orig", None)
+    text_source = f"{orig or ''} {exc}".lower()
+    return (
+        "class_period_closed" in text_source
+        or "fn_prevent_closed_class_mutation" in text_source
+        or "período letivo encerrado" in text_source
+    )
+
+
 async def sqlalchemy_exception_handler(
     request: Request,
     exc: SQLAlchemyError,
 ) -> JSONResponse:
-    """Trata erros do SQLAlchemy (constraints/integridade e falhas de banco) sem vazar SQL."""
+    """Trata erros do SQLAlchemy (constraints/integridade, triggers DB-029 e falhas de banco) sem vazar SQL."""
+    if _is_closed_class_trigger_error(exc):
+        status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+        error_code = "CLASS_PERIOD_CLOSED"
+        message = "Período letivo encerrado para esta turma."
+        logger.bind(
+            method=request.method,
+            path=request.url.path,
+            status_code=status_code,
+            error=error_code,
+            db_exception_type=type(exc).__name__,
+        ).warning("Mutação bloqueada pela trigger de período letivo encerrado (DB-029).")
+        return build_error_response(
+            status_code=status_code,
+            error=error_code,
+            message=message,
+        )
+
     if isinstance(exc, IntegrityError):
         status_code, error_code, message = _classify_integrity_error(exc)
         logger.bind(

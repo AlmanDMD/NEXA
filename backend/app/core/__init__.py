@@ -1,5 +1,14 @@
 """Módulo core com configurações globais, banco de dados, logging, exceções e segurança."""
 
+from app.core.class_period_guard import (
+    CLASS_PERIOD_CLOSED_ERROR_CODE,
+    CLASS_PERIOD_CLOSED_MESSAGE,
+    CLOSED_CLASS_STATUSES,
+    ClassResolutionSource,
+    MUTATION_HTTP_METHODS,
+    check_class_is_active,
+    raise_if_class_period_closed,
+)
 from app.core.config import Settings, SettingsDep, get_settings
 from app.core.database import DbSessionDep, get_db, get_engine, get_session_factory
 from app.core.exception_handlers import register_exception_handlers
@@ -46,6 +55,10 @@ __all__ = [
     "ACCESS_TOKEN_EXPIRE_MINUTES",
     "AppException",
     "BadRequestException",
+    "CLASS_PERIOD_CLOSED_ERROR_CODE",
+    "CLASS_PERIOD_CLOSED_MESSAGE",
+    "CLOSED_CLASS_STATUSES",
+    "ClassResolutionSource",
     "ConflictException",
     "CurrentUserDep",
     "DEFAULT_BCRYPT_ROUNDS",
@@ -56,6 +69,7 @@ __all__ = [
     "MAX_BCRYPT_PASSWORD_BYTES",
     "MAX_BCRYPT_ROUNDS",
     "MIN_BCRYPT_ROUNDS",
+    "MUTATION_HTTP_METHODS",
     "NotFoundException",
     "PasswordHasher",
     "PasswordHasherDep",
@@ -65,6 +79,7 @@ __all__ = [
     "UnauthorizedException",
     "UnprocessableEntityException",
     "bearer_scheme",
+    "check_class_is_active",
     "create_access_token",
     "create_refresh_token",
     "decode_access_token",
@@ -82,6 +97,7 @@ __all__ = [
     "needs_rehash",
     "oauth2_scheme",
     "password_hasher",
+    "raise_if_class_period_closed",
     "register_exception_handlers",
     "require_role",
     "setup_logging",

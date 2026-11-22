@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 
+from app.core.class_period_guard import check_class_is_active
 from app.core.security import require_role
 from app.models.user import User
 from app.schemas.academic_assessment import (
@@ -39,6 +40,7 @@ async def create_assessment(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("body_class_id"))] = None,
 ) -> AcademicAssessmentResponseSchema:
     """Cadastra avaliação formativa validando turma ativa, disciplina, módulo e alocação docente."""
     return assessment_service.create_assessment(
@@ -83,6 +85,7 @@ async def record_batch_grades(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("assessment_id"))] = None,
 ) -> BatchStudentGradesResponseSchema:
     """Lança notas (0.00 a 10.00) e recuperações em lote na turma e grava retificações em audit_logs."""
     client_ip = request.client.host if request.client is not None else None
@@ -107,6 +110,7 @@ async def calculate_class_averages(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("class_id"))] = None,
 ) -> ClassGradesSummaryResponseSchema:
     """Calcula médias ponderadas por módulo/disciplina (student_grades + task_submissions) e atualiza enrollments."""
     return assessment_service.calculate_class_averages(

@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from app.core.class_period_guard import check_class_is_active
 from app.core.security import require_role
 from app.models.user import User
 from app.schemas.base import UUIDPathParam
@@ -39,6 +40,7 @@ async def create_lesson(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("body_class_id"))] = None,
 ) -> ClassLessonResponseSchema:
     """Registra conteúdo e oficina da aula ministrada e inicializa lista de chamada dos ativos."""
     return lesson_service.create_lesson(payload, current_user=current_user)
@@ -81,6 +83,7 @@ async def record_batch_attendance(
         User,
         Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
     ],
+    _class_guard: Annotated[object, Depends(check_class_is_active("lesson_id"))] = None,
 ) -> BatchAttendanceResponseSchema:
     """Executa upsert transacional da chamada da aula e recalcula attendance_rate no servidor."""
     return lesson_service.record_batch_attendance(
