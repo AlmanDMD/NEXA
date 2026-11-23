@@ -252,10 +252,16 @@ NEXA/
 ├── .github/
 │   └── workflows/
 │       └── project-auto-sync.yml      # CI/CD: sincronização de issues com os 5 GitHub Projects
+├── BancoNexa/                         # Scripts SQL Nativos (3FN), Docker initdb, Migrations e Tipos Enum
+│   ├── docker/initdb/                 # Scripts de inicialização automática do PostgreSQL 16
+│   ├── migrations/                    # Migrations SQL versionadas (Lote 1: DB-004 a DB-009)
+│   ├── sql/                           # Scripts DDL/PLpgSQL modulares e consolidados
+│   └── types/                         # Contratos de tipos exportados (TypeScript, Python, JSON Schema)
 ├── Diagrama_caso_de_uso/
 │   ├── diagrama-caso-de-uso.md        # Documentação inicial de Casos de Uso e Matriz
 │   └── image.png                      # Representação gráfica dos atores e casos de uso
 ├── docs/                              # Portal mestre de governança e engenharia de software
+│   ├── banco/                         # Documentação técnica dos cards de Banco de Dados (DB-001 a DB-010)
 │   ├── backlog/
 │   │   ├── 00-visao-arquitetura.md    # Visão unificada, arquitetura e mapa dos 10 Épicos
 │   │   ├── 01-banco-de-dados.md       # Backlog de Engenharia de Dados (50 cards: DB-001 a DB-050)
@@ -271,7 +277,8 @@ NEXA/
 │   ├── vite.config.js                 # Configuração do Vite e plugins
 │   ├── package.json                   # Dependências do Front-end (React 19, Tailwind v4)
 │   └── .oxlintrc.json                 # Regras de linting do Oxlint
-├── scripts/                           # Automações de gerenciamento do repositório
+├── prisma/                            # Schema Prisma, Migrations versionadas e verificador check-connection.ts
+├── scripts/                           # Automações de gerenciamento do repositório e validação DB (DB-001 a DB-010)
 │   ├── data/                          # Dicionários de dados dos 170 cards divididos por squad
 │   │   ├── database.js                # 50 cards de Banco de Dados
 │   │   ├── backend.js                 # 50 cards de Back-end
@@ -283,6 +290,7 @@ NEXA/
 │   └── assign-issues.js               # Atribuição e rotulagem em lote de cards
 ├── .env.example                       # Modelo de variáveis de ambiente para integração
 ├── .gitignore                         # Regras de exclusão de arquivos no Git
+├── docker-compose.yml                 # Orquestração do container PostgreSQL 16 Alpine (DB-003)
 └── README.md                          # Este arquivo (guia principal do projeto)
 ```
 
@@ -347,11 +355,35 @@ cp .env.example .env
 
 ---
 
-### Passo 3: Inicializar o Banco de Dados com Docker
-Para subir uma instância do PostgreSQL 16 com as portas devidamente mapeadas:
+### Passo 3: Inicializar o Banco de Dados com Docker, Migrations e Verificação (`DB-001` a `DB-010`)
+Para subir uma instância do PostgreSQL 16 Alpine com as portas devidamente mapeadas (`DB-003`):
 ```bash
 docker compose up -d
 ```
+
+Para executar as migrations SQL versionadas, gerar os contratos de tipos (`DB-004` a `DB-009`) e verificar a conectividade e sanidade das **4 tabelas fundamentais do Lote 1** (`users`, `user_profiles`, `auth_sessions`, `audit_logs`) via [`prisma/check-connection.ts`](./prisma/check-connection.ts) (`DB-010`):
+```bash
+npm.cmd run db:generate
+npm.cmd run db:migrate
+node prisma/check-connection.ts
+# ou:
+npm.cmd run db:check
+
+# Para rodar toda a suíte automatizada de validação (DB-001 a DB-010):
+npm.cmd run db:validate
+```
+
+#### 📚 Documentação Técnica de Banco de Dados (`Lote 1 / Sprint 1`)
+- [`DB-001` — Modelo Conceitual e Entidades SENAI](./docs/banco/01-modelo-conceitual.md)
+- [`DB-002` — Modelo Lógico Relacional Normalizado (3FN)](./docs/banco/02-modelo-logico-3fn.md)
+- [`DB-003` — Instância PostgreSQL 16 e Docker Compose](./docs/banco/03-instancia-postgresql-docker.md)
+- [`DB-004` — Estrutura de Migrations SQL Versionadas](./docs/banco/04-estrutura-migrations-versionadas.md)
+- [`DB-005` — Enumerações Globais de Sistema](./docs/banco/05-enumeracoes-globais-sistema.md)
+- [`DB-006` — Tabela de Usuários (`users`) e Hash Seguro](./docs/banco/06-tabela-usuarios-hash-senha.md)
+- [`DB-007` — Tabela de Perfis (`user_profiles`) e Minimização LGPD](./docs/banco/07-tabela-perfis-usuario-lgpd.md)
+- [`DB-008` — Tabela de Sessões e Refresh Tokens (`auth_sessions`)](./docs/banco/08-tabela-sessoes-refresh-tokens.md)
+- [`DB-009` — Tabela de Registro de Atividades e Auditoria (`audit_logs`)](./docs/banco/09-tabela-auditoria-logs-jsonb.md)
+- [`DB-010` — Migração Inicial Consolidada e Verificação de Conexão](./docs/banco/10-migracao-inicial-verificacao-conexao.md)
 
 ---
 

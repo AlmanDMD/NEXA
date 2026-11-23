@@ -1,0 +1,49 @@
+# 🗄️ Workspace de Banco de Dados — Projeto NEXA (SENAI)
+
+Este diretório concentra os artefatos, modelos, scripts **SQL nativos (PostgreSQL 16)**, configuração **Docker**, **Migrations SQL versionadas**, contratos de **Tipos Enum** e validações da trilha de **Banco de Dados (`DB-001` a `DB-050`)** do **Sistema Inteligente de Monitoramento do Desempenho Acadêmico — SENAI (NEXA)**.
+
+> **Diretriz Arquitetural de Banco de Dados**: Todo o desenvolvimento de banco de dados do projeto NEXA é construído sobre **Docker + PostgreSQL 16 + SQL Nativo (DDL/DML/PLpgSQL)**.
+
+---
+
+## 📂 Estrutura de Entregáveis (Sprint 1 / Lote 1)
+
+| Card | Entregável | Caminho no Repositório | Status |
+|---|---|---|---|
+| **`DB-001`** | Modelo Conceitual e Entidades do Domínio Acadêmico SENAI | [`docs/banco/01-modelo-conceitual.md`](../docs/banco/01-modelo-conceitual.md) e [`BancoNexa/01-modelo-conceitual.md`](./01-modelo-conceitual.md) | ✅ Concluído |
+| **`DB-002`** | Modelo Lógico Relacional Normalizado (3FN) + Script DDL SQL | [`docs/banco/02-modelo-logico-3fn.md`](../docs/banco/02-modelo-logico-3fn.md) e [`BancoNexa/sql/02_modelo_logico_3fn.sql`](./sql/02_modelo_logico_3fn.sql) | ✅ Concluído |
+| **`DB-003`** | Instância PostgreSQL 16 e Ambiente Docker Compose | [`docker-compose.yml`](../docker-compose.yml), [`.env.example`](../.env.example), [`BancoNexa/docker/initdb/`](./docker/initdb/) e [`docs/banco/03-instancia-postgresql-docker.md`](../docs/banco/03-instancia-postgresql-docker.md) | ✅ Concluído |
+| **`DB-004`** | Estrutura de Esquema e Migrations SQL Versionadas | [`prisma/schema.prisma`](../prisma/schema.prisma), [`prisma/migrations/`](../prisma/migrations/), [`BancoNexa/migrations/`](./migrations/), [`scripts/db-migrate.js`](../scripts/db-migrate.js) e [`docs/banco/04-estrutura-migrations-versionadas.md`](../docs/banco/04-estrutura-migrations-versionadas.md) | ✅ Concluído |
+| **`DB-005`** | Enumerações Globais de Sistema (Roles, Status, Graus de Risco) | [`BancoNexa/sql/05_enums_globais.sql`](./sql/05_enums_globais.sql), [`BancoNexa/types/`](./types/) e [`docs/banco/05-enumeracoes-globais-sistema.md`](../docs/banco/05-enumeracoes-globais-sistema.md) | ✅ Concluído |
+| **`DB-006`** | Tabela de Usuários (`users`) com Hash Seguro de Senha | [`BancoNexa/sql/06_tabela_users.sql`](./sql/06_tabela_users.sql), [`prisma/migrations/20261105000000_create_users_table/`](../prisma/migrations/20261105000000_create_users_table/) e [`docs/banco/06-tabela-usuarios-hash-senha.md`](../docs/banco/06-tabela-usuarios-hash-senha.md) | ✅ Concluído |
+| **`DB-007`** | Tabela de Perfis de Usuário (`user_profiles`) e Dados de Contato | [`BancoNexa/sql/07_tabela_user_profiles.sql`](./sql/07_tabela_user_profiles.sql), [`prisma/migrations/20261105010000_create_user_profiles_table/`](../prisma/migrations/20261105010000_create_user_profiles_table/) e [`docs/banco/07-tabela-perfis-usuario-lgpd.md`](../docs/banco/07-tabela-perfis-usuario-lgpd.md) | ✅ Concluído |
+| **`DB-008`** | Tabela de Sessões e Refresh Tokens com Revogação (`auth_sessions`) | [`BancoNexa/sql/08_tabela_auth_sessions.sql`](./sql/08_tabela_auth_sessions.sql), [`prisma/migrations/20261105020000_create_auth_sessions_table/`](../prisma/migrations/20261105020000_create_auth_sessions_table/) e [`docs/banco/08-tabela-sessoes-refresh-tokens.md`](../docs/banco/08-tabela-sessoes-refresh-tokens.md) | ✅ Concluído |
+| **`DB-009`** | Tabela de Registro de Atividades e Auditoria (`audit_logs`) | [`BancoNexa/sql/09_tabela_audit_logs.sql`](./sql/09_tabela_audit_logs.sql), [`prisma/migrations/20261105030000_create_audit_logs_table/`](../prisma/migrations/20261105030000_create_audit_logs_table/) e [`docs/banco/09-tabela-auditoria-logs-jsonb.md`](../docs/banco/09-tabela-auditoria-logs-jsonb.md) | ✅ Concluído |
+| **`DB-010`** | Script Base de Migração Inicial e Verificação de Conexão | [`prisma/check-connection.ts`](../prisma/check-connection.ts), [`BancoNexa/sql/10_migracao_inicial_lote1_e_sanidade.sql`](./sql/10_migracao_inicial_lote1_e_sanidade.sql), [`README.md`](../README.md) e [`docs/banco/10-migracao-inicial-verificacao-conexao.md`](../docs/banco/10-migracao-inicial-verificacao-conexao.md) | ✅ Concluído (Lote 1 Finalizado) |
+
+---
+
+## 📂 Estrutura de Entregáveis (Sprint 2 / Lote 2 — Gestão Acadêmica & Estrutura SENAI)
+
+| Card | Entregável | Caminho no Repositório | Status |
+|---|---|---|---|
+| **`DB-011`** | Tabela de Cursos Técnicos (`courses`) | [`BancoNexa/sql/11_tabela_courses.sql`](./sql/11_tabela_courses.sql), [`prisma/migrations/20261118000000_create_courses_table/`](../prisma/migrations/20261118000000_create_courses_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/11-tabela-cursos-tecnicos-senai.md`](../docs/banco/11-tabela-cursos-tecnicos-senai.md) | ✅ Concluído |
+| **`DB-012`** | Tabela de Turmas Acadêmicas (`classes`) | [`BancoNexa/sql/12_tabela_classes.sql`](./sql/12_tabela_classes.sql), [`prisma/migrations/20261118010000_create_classes_table/`](../prisma/migrations/20261118010000_create_classes_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/12-tabela-turmas-academicas-classes.md`](../docs/banco/12-tabela-turmas-academicas-classes.md) | ✅ Concluído |
+| **`DB-013`** | Tabela de Disciplinas Teórico-Práticas (`subjects`) | [`BancoNexa/sql/13_tabela_subjects.sql`](./sql/13_tabela_subjects.sql), [`prisma/migrations/20261118020000_create_subjects_table/`](../prisma/migrations/20261118020000_create_subjects_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/13-tabela-disciplinas-subjects.md`](../docs/banco/13-tabela-disciplinas-subjects.md) | ✅ Concluído |
+| **`DB-014`** | Tabela de Módulos de Aprendizagem Prática SENAI (`learning_modules`) | [`BancoNexa/sql/14_tabela_learning_modules.sql`](./sql/14_tabela_learning_modules.sql), [`prisma/migrations/20261118030000_create_learning_modules_table/`](../prisma/migrations/20261118030000_create_learning_modules_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/14-tabela-modulos-aprendizagem-pratica-learning-modules.md`](../docs/banco/14-tabela-modulos-aprendizagem-pratica-learning-modules.md) | ✅ Concluído |
+| **`DB-015`** | Tabela de Competências e Habilidades Técnicas (`competencies`) | [`BancoNexa/sql/15_tabela_competencies.sql`](./sql/15_tabela_competencies.sql), [`prisma/migrations/20261118040000_create_competencies_table/`](../prisma/migrations/20261118040000_create_competencies_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/15-tabela-competencias-habilidades-competencies.md`](../docs/banco/15-tabela-competencias-habilidades-competencies.md) | ✅ Concluído |
+| **`DB-016`** | Relacionamento Módulo-Competência (`module_competencies`) + Seed Preliminar | [`BancoNexa/sql/16_tabela_module_competencies.sql`](./sql/16_tabela_module_competencies.sql), [`BancoNexa/sql/16_seed_preliminar_module_competencies.sql`](./sql/16_seed_preliminar_module_competencies.sql), [`prisma/migrations/20261118050000_create_module_competencies_table/`](../prisma/migrations/20261118050000_create_module_competencies_table/) e [`docs/banco/16-tabela-relacionamento-modulo-competencia-module-competencies.md`](../docs/banco/16-tabela-relacionamento-modulo-competencia-module-competencies.md) | ✅ Concluído |
+| **`DB-017`** | Tabela de Matrículas de Estudantes (`enrollments`) | [`BancoNexa/sql/17_tabela_enrollments.sql`](./sql/17_tabela_enrollments.sql), [`prisma/migrations/20261118060000_create_enrollments_table/`](../prisma/migrations/20261118060000_create_enrollments_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/17-tabela-matriculas-estudantes-enrollments.md`](../docs/banco/17-tabela-matriculas-estudantes-enrollments.md) | ✅ Concluído |
+| **`DB-018`** | Associação de Professores a Disciplinas e Turmas (`teacher_assignments`) | [`BancoNexa/sql/18_tabela_teacher_assignments.sql`](./sql/18_tabela_teacher_assignments.sql), [`prisma/migrations/20261118070000_create_teacher_assignments_table/`](../prisma/migrations/20261118070000_create_teacher_assignments_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/18-tabela-associacao-professores-teacher-assignments.md`](../docs/banco/18-tabela-associacao-professores-teacher-assignments.md) | ✅ Concluído |
+| **`DB-019`** | Constraints de Unicidade e Integridade Acadêmica em Matrículas | [`BancoNexa/sql/19_constraints_integridade_academica_matriculas.sql`](./sql/19_constraints_integridade_academica_matriculas.sql), [`BancoNexa/sql/19_testes_violacao_constraints.sql`](./sql/19_testes_violacao_constraints.sql), [`prisma/migrations/20261118080000_enforce_academic_integrity_constraints/`](../prisma/migrations/20261118080000_enforce_academic_integrity_constraints/) e [`docs/banco/19-constraints-integridade-academica-matriculas.md`](../docs/banco/19-constraints-integridade-academica-matriculas.md) | ✅ Concluído |
+| **`DB-020`** | Seed de Estrutura Curricular SENAI (Mecânica e Metrologia) | [`prisma/seed.ts`](../prisma/seed.ts), [`BancoNexa/sql/20_seed_estrutura_curricular_senai.sql`](./sql/20_seed_estrutura_curricular_senai.sql) e [`docs/banco/20-seed-estrutura-curricular-senai.md`](../docs/banco/20-seed-estrutura-curricular-senai.md) | ✅ Concluído (Lote 2 Finalizado) |
+
+---
+
+## 🧪 Validação Automatizada dos Cards Concluídos
+
+Para executar todos os testes de validação de conformidade dos cards de Banco de Dados na raiz do repositório:
+
+```bash
+npm.cmd run db:validate
+```

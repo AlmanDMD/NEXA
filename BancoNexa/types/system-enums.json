@@ -1,0 +1,178 @@
+{
+  "generatedAt": "DB-005",
+  "enums": [
+    {
+      "name": "Role",
+      "pgTypeName": "user_role_enum",
+      "values": [
+        "ADMIN",
+        "COORDINATOR",
+        "TEACHER",
+        "STUDENT"
+      ]
+    },
+    {
+      "name": "EnrollmentStatus",
+      "pgTypeName": "enrollment_status_enum",
+      "values": [
+        "ACTIVE",
+        "COMPLETED",
+        "DROPPED",
+        "SUSPENDED"
+      ]
+    },
+    {
+      "name": "RiskLevel",
+      "pgTypeName": "risk_level_enum",
+      "values": [
+        "LOW",
+        "MODERATE",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    {
+      "name": "SubmissionStatus",
+      "pgTypeName": "submission_status_enum",
+      "values": [
+        "PENDING",
+        "SUBMITTED",
+        "EVALUATED",
+        "LATE"
+      ]
+    },
+    {
+      "name": "HelpRequestStatus",
+      "pgTypeName": "help_request_status_enum",
+      "values": [
+        "OPEN",
+        "IN_PROGRESS",
+        "RESOLVED",
+        "CLOSED"
+      ]
+    },
+    {
+      "name": "Shift",
+      "pgTypeName": "shift_enum",
+      "values": [
+        "MORNING",
+        "AFTERNOON",
+        "NIGHT"
+      ]
+    },
+    {
+      "name": "ClassStatus",
+      "pgTypeName": "class_status_enum",
+      "values": [
+        "PLANNING",
+        "ACTIVE",
+        "COMPLETED",
+        "ARCHIVED"
+      ]
+    },
+    {
+      "name": "CompetencyCategory",
+      "pgTypeName": "competency_category_enum",
+      "values": [
+        "TECHNICAL",
+        "SAFETY",
+        "PROCEDURAL"
+      ]
+    },
+    {
+      "name": "AttendanceStatus",
+      "pgTypeName": "attendance_status_enum",
+      "values": [
+        "PRESENT",
+        "ABSENT",
+        "LATE",
+        "JUSTIFIED"
+      ]
+    },
+    {
+      "name": "AssessmentType",
+      "pgTypeName": "assessment_type_enum",
+      "values": [
+        "EXAM",
+        "MICRO_EVALUATION",
+        "PROJECT"
+      ]
+    },
+    {
+      "name": "AlertCategory",
+      "pgTypeName": "alert_category_enum",
+      "values": [
+        "ATTENDANCE",
+        "GRADE_DROP",
+        "PENDING_TASKS",
+        "SELF_EVAL_GAP"
+      ]
+    },
+    {
+      "name": "AlertStatus",
+      "pgTypeName": "alert_status_enum",
+      "values": [
+        "ACTIVE",
+        "ACKNOWLEDGED",
+        "RESOLVED"
+      ]
+    },
+    {
+      "name": "DiagnosticType",
+      "pgTypeName": "diagnostic_type_enum",
+      "values": [
+        "ALIGNED",
+        "OVERCONFIDENCE_RISK",
+        "UNDERCONFIDENCE_SUPPORT",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "name": "MilestoneType",
+      "pgTypeName": "milestone_type_enum",
+      "values": [
+        "MODULE_COMPLETED",
+        "SKILL_LEVEL_UP",
+        "PERFECT_ATTENDANCE",
+        "RECOVERY_ACHIEVED"
+      ]
+    },
+    {
+      "name": "AnnouncementPriority",
+      "pgTypeName": "announcement_priority_enum",
+      "values": [
+        "NORMAL",
+        "IMPORTANT",
+        "URGENT"
+      ]
+    },
+    {
+      "name": "HelpRequestCategory",
+      "pgTypeName": "help_request_category_enum",
+      "values": [
+        "TECHNICAL_DOUBT",
+        "PRACTICAL_DIFFICULTY",
+        "PERSONAL_PEDAGOGICAL"
+      ]
+    },
+    {
+      "name": "NoteVisibilityScope",
+      "pgTypeName": "note_visibility_scope_enum",
+      "values": [
+        "PRIVATE_AUTHOR",
+        "TEACHERS_AND_COORD",
+        "COORDINATION_ONLY"
+      ]
+    },
+    {
+      "name": "NoteCategory",
+      "pgTypeName": "note_category_enum",
+      "values": [
+        "INTERVENTION",
+        "MENTORING",
+        "BEHAVIORAL",
+        "ACCOMMODATION"
+      ]
+    }
+  ]
+}

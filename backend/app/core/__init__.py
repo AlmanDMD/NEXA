@@ -1,6 +1,7 @@
-"""Módulo core com configurações globais, logging, exceções e segurança."""
+"""Módulo core com configurações globais, banco de dados, logging, exceções e segurança."""
 
 from app.core.config import Settings, SettingsDep, get_settings
+from app.core.database import DbSessionDep, get_db, get_engine, get_session_factory
 from app.core.exception_handlers import register_exception_handlers
 from app.core.exceptions import (
     AppException,
@@ -13,20 +14,68 @@ from app.core.exceptions import (
     UnprocessableEntityException,
 )
 from app.core.logging import logger, setup_logging
+from app.core.security import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    DEFAULT_BCRYPT_ROUNDS,
+    DEFAULT_JWT_ALGORITHM,
+    MAX_BCRYPT_PASSWORD_BYTES,
+    MAX_BCRYPT_ROUNDS,
+    MIN_BCRYPT_ROUNDS,
+    PasswordHasher,
+    PasswordHasherDep,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    bearer_scheme,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+    get_password_hash,
+    get_password_hasher,
+    hash_password,
+    hash_refresh_token,
+    needs_rehash,
+    password_hasher,
+    verify_password,
+)
 
 __all__ = [
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
     "AppException",
     "BadRequestException",
     "ConflictException",
+    "DEFAULT_BCRYPT_ROUNDS",
+    "DEFAULT_JWT_ALGORITHM",
+    "DbSessionDep",
     "ForbiddenException",
     "InternalServerException",
+    "MAX_BCRYPT_PASSWORD_BYTES",
+    "MAX_BCRYPT_ROUNDS",
+    "MIN_BCRYPT_ROUNDS",
     "NotFoundException",
+    "PasswordHasher",
+    "PasswordHasherDep",
+    "REFRESH_TOKEN_EXPIRE_DAYS",
     "Settings",
     "SettingsDep",
     "UnauthorizedException",
     "UnprocessableEntityException",
+    "bearer_scheme",
+    "create_access_token",
+    "create_refresh_token",
+    "decode_access_token",
+    "decode_refresh_token",
+    "get_db",
+    "get_engine",
+    "get_password_hash",
+    "get_password_hasher",
+    "get_session_factory",
     "get_settings",
+    "hash_password",
+    "hash_refresh_token",
     "logger",
+    "needs_rehash",
+    "password_hasher",
     "register_exception_handlers",
     "setup_logging",
+    "verify_password",
 ]
