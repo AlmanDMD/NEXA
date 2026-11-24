@@ -4,7 +4,7 @@
  * Sincronizado com `prisma/schema.prisma` (camelCase na aplicação e snake_case no SQL).
  */
 
-import type { AttendanceStatus, ClassStatus, CompetencyCategory, EnrollmentStatus, Role, Shift, SubmissionStatus } from './system-enums';
+import type { AssessmentType, AttendanceStatus, ClassStatus, CompetencyCategory, EnrollmentStatus, Role, Shift, SubmissionStatus } from './system-enums';
 
 /** Modelo Prisma `SchemaMigration` mapeado para a tabela PostgreSQL `schema_migrations` */
 export interface SchemaMigration {
@@ -731,3 +731,216 @@ export interface TaskSubmissionCreateInput {
 
 /** Payload de atualização parcial para `TaskSubmission` */
 export type TaskSubmissionUpdateInput = Partial<Omit<TaskSubmissionCreateInput, 'id'>>;
+
+/** Modelo Prisma `SubmissionEvaluation` mapeado para a tabela PostgreSQL `submission_evaluations` */
+export interface SubmissionEvaluation {
+  id: string;
+  submissionId: string;
+  criterionId: string;
+  evaluatorId: string;
+  achievedLevel: number;
+  scoreAwarded: number | string;
+  technicalFeedback: string | null;
+  evaluatedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `submission_evaluations` */
+export interface SubmissionEvaluationRow {
+  id: string;
+  submission_id: string;
+  criterion_id: string;
+  evaluator_id: string;
+  achieved_level: number;
+  score_awarded: number | string;
+  technical_feedback: string | null;
+  evaluated_at: Date;
+}
+
+/** Payload de criação para `SubmissionEvaluation` */
+export interface SubmissionEvaluationCreateInput {
+  id?: string;
+  submissionId: string;
+  criterionId: string;
+  evaluatorId: string;
+  achievedLevel: number;
+  scoreAwarded: number | string;
+  technicalFeedback?: string | null;
+  evaluatedAt?: Date;
+}
+
+/** Payload de atualização parcial para `SubmissionEvaluation` */
+export type SubmissionEvaluationUpdateInput = Partial<Omit<SubmissionEvaluationCreateInput, 'id'>>;
+
+/** Modelo Prisma `AcademicAssessment` mapeado para a tabela PostgreSQL `academic_assessments` */
+export interface AcademicAssessment {
+  id: string;
+  classId: string;
+  subjectId: string;
+  moduleId: string | null;
+  title: string;
+  assessmentType: AssessmentType;
+  weight: number | string;
+  applicationDate: Date;
+  maxGrade: number | string;
+  createdAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `academic_assessments` */
+export interface AcademicAssessmentRow {
+  id: string;
+  class_id: string;
+  subject_id: string;
+  module_id: string | null;
+  title: string;
+  assessment_type: AssessmentType;
+  weight: number | string;
+  application_date: Date;
+  max_grade: number | string;
+  created_at: Date;
+}
+
+/** Payload de criação para `AcademicAssessment` */
+export interface AcademicAssessmentCreateInput {
+  id?: string;
+  classId: string;
+  subjectId: string;
+  moduleId?: string | null;
+  title: string;
+  assessmentType: AssessmentType;
+  weight?: number | string;
+  applicationDate: Date;
+  maxGrade?: number | string;
+  createdAt?: Date;
+}
+
+/** Payload de atualização parcial para `AcademicAssessment` */
+export type AcademicAssessmentUpdateInput = Partial<Omit<AcademicAssessmentCreateInput, 'id'>>;
+
+/** Modelo Prisma `StudentGrade` mapeado para a tabela PostgreSQL `student_grades` */
+export interface StudentGrade {
+  id: string;
+  assessmentId: string;
+  enrollmentId: string;
+  studentId: string;
+  recordedBy: string;
+  gradeValue: number | string;
+  recoveryGrade: number | string | null;
+  comments: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `student_grades` */
+export interface StudentGradeRow {
+  id: string;
+  assessment_id: string;
+  enrollment_id: string;
+  student_id: string;
+  recorded_by: string;
+  grade_value: number | string;
+  recovery_grade: number | string | null;
+  comments: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Payload de criação para `StudentGrade` */
+export interface StudentGradeCreateInput {
+  id?: string;
+  assessmentId: string;
+  enrollmentId: string;
+  studentId: string;
+  recordedBy: string;
+  gradeValue: number | string;
+  recoveryGrade?: number | string | null;
+  comments?: string | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/** Payload de atualização parcial para `StudentGrade` */
+export type StudentGradeUpdateInput = Partial<Omit<StudentGradeCreateInput, 'id'>>;
+
+/** Modelo Prisma `SelfAssessmentForm` mapeado para a tabela PostgreSQL `self_assessment_forms` */
+export interface SelfAssessmentForm {
+  id: string;
+  moduleId: string;
+  classId: string;
+  title: string;
+  instructions: string | null;
+  opensAt: Date;
+  closesAt: Date;
+  isActive: boolean;
+  createdBy: string;
+  createdAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `self_assessment_forms` */
+export interface SelfAssessmentFormRow {
+  id: string;
+  module_id: string;
+  class_id: string;
+  title: string;
+  instructions: string | null;
+  opens_at: Date;
+  closes_at: Date;
+  is_active: boolean;
+  created_by: string;
+  created_at: Date;
+}
+
+/** Payload de criação para `SelfAssessmentForm` */
+export interface SelfAssessmentFormCreateInput {
+  id?: string;
+  moduleId: string;
+  classId: string;
+  title: string;
+  instructions?: string | null;
+  opensAt: Date;
+  closesAt: Date;
+  isActive?: boolean;
+  createdBy: string;
+  createdAt?: Date;
+}
+
+/** Payload de atualização parcial para `SelfAssessmentForm` */
+export type SelfAssessmentFormUpdateInput = Partial<Omit<SelfAssessmentFormCreateInput, 'id'>>;
+
+/** Modelo Prisma `StudentSelfAssessment` mapeado para a tabela PostgreSQL `student_self_assessments` */
+export interface StudentSelfAssessment {
+  id: string;
+  formId: string;
+  studentId: string;
+  competencyId: string;
+  perceivedLevel: number;
+  confidenceScore: number;
+  difficultyNotes: string | null;
+  submittedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `student_self_assessments` */
+export interface StudentSelfAssessmentRow {
+  id: string;
+  form_id: string;
+  student_id: string;
+  competency_id: string;
+  perceived_level: number;
+  confidence_score: number;
+  difficulty_notes: string | null;
+  submitted_at: Date;
+}
+
+/** Payload de criação para `StudentSelfAssessment` */
+export interface StudentSelfAssessmentCreateInput {
+  id?: string;
+  formId: string;
+  studentId: string;
+  competencyId: string;
+  perceivedLevel: number;
+  confidenceScore: number;
+  difficultyNotes?: string | null;
+  submittedAt?: Date;
+}
+
+/** Payload de atualização parcial para `StudentSelfAssessment` */
+export type StudentSelfAssessmentUpdateInput = Partial<Omit<StudentSelfAssessmentCreateInput, 'id'>>;

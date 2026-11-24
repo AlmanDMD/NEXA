@@ -230,9 +230,14 @@ model User {
   auditLogs          AuditLog[]
   enrollments        Enrollment[]
   teacherAssignments TeacherAssignment[]
-  classLessons       ClassLesson[]
-  attendanceRecords  AttendanceRecord[]
-  taskSubmissions    TaskSubmission[]
+  classLessons          ClassLesson[]
+  attendanceRecords     AttendanceRecord[]
+  taskSubmissions       TaskSubmission[]
+  submissionEvaluations SubmissionEvaluation[]
+  studentGrades         StudentGrade[]         @relation("StudentGradeStudent")
+  recordedGrades         StudentGrade[]          @relation("StudentGradeRecorder")
+  selfAssessmentForms    SelfAssessmentForm[]
+  studentSelfAssessments StudentSelfAssessment[]
 
   @@index([email], map: "idx_users_email")
   @@index([role, isActive], map: "idx_users_role_is_active")
@@ -322,6 +327,7 @@ model Course {
 /// - `chk_classes_date_range`: `CHECK (start_date < end_date)`
 /// - `chk_classes_max_students`: `CHECK (max_students > 0 AND max_students <= 100)`
 /// - `trg_classes_validate_max_students_reduction`: impede reduzir `max_students` abaixo das matrículas `ACTIVE`
+/// - `fn_prevent_closed_class_mutation` (DB-029): bloqueia `INSERT`/`UPDATE`/`DELETE` em `student_grades`, `attendance_records`, `task_submissions` e `submission_evaluations` quando `status IN ('COMPLETED', 'ARCHIVED')` (mantendo `SELECT` liberado)
 model Class {
   id          String      @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
   courseId    String      @map("course_id") @db.Uuid
@@ -336,9 +342,11 @@ model Class {
   updatedAt   DateTime    @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_classes_course")
   enrollments        Enrollment[]
-  teacherAssignments TeacherAssignment[]
-  classLessons       ClassLesson[]
-  practicalTasks     PracticalTask[]
+  teacherAssignments  TeacherAssignment[]
+  classLessons        ClassLesson[]
+  practicalTasks      PracticalTask[]
+  academicAssessments AcademicAssessment[]
+  selfAssessmentForms SelfAssessmentForm[]
 
   @@unique([code, period], map: "uq_classes_code_period")
   @@index([courseId, period], map: "idx_classes_course_period")
@@ -360,8 +368,9 @@ model Subject {
   updatedAt     DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_subjects_course")
   learningModules    LearningModule[]
-  teacherAssignments TeacherAssignment[]
-  classLessons       ClassLesson[]
+  teacherAssignments  TeacherAssignment[]
+  classLessons        ClassLesson[]
+  academicAssessments AcademicAssessment[]
 
   @@unique([courseId, code], map: "uq_subjects_course_code")
   @@index([name], map: "idx_subjects_name")
@@ -383,8 +392,10 @@ model LearningModule {
   updatedAt      DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
   subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_learning_modules_subject")
   moduleCompetencies ModuleCompetency[]
-  classLessons       ClassLesson[]
-  practicalTasks     PracticalTask[]
+  classLessons        ClassLesson[]
+  practicalTasks      PracticalTask[]
+  academicAssessments AcademicAssessment[]
+  selfAssessmentForms SelfAssessmentForm[]
 
   @@unique([subjectId, orderIndex], map: "uq_learning_modules_subject_order")
   @@index([subjectId, orderIndex], map: "idx_learning_modules_subject_order")
@@ -401,8 +412,9 @@ model Competency {
   description        String?            @map("description") @db.Text
   createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime           @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
-  moduleCompetencies ModuleCompetency[]
-  taskCriteria       TaskCriterion[]
+  moduleCompetencies     ModuleCompetency[]
+  taskCriteria           TaskCriterion[]
+  studentSelfAssessments StudentSelfAssessment[]
 
   @@index([code], map: "idx_competencies_code")
   @@index([category], map: "idx_competencies_category")
@@ -448,6 +460,7 @@ model Enrollment {
   class             Class              @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_class")
   attendanceRecords AttendanceRecord[]
   taskSubmissions   TaskSubmission[]
+  studentGrades     StudentGrade[]
 
   @@unique([studentId, classId], map: "uq_enrollments_student_class")
   @@index([attendanceRate], map: "idx_enrollments_attendance_rate")
@@ -514,6 +527,7 @@ model ClassLesson {
 /// - `chk_attendance_absent_hours`: `CHECK (absent_hours >= 0 AND absent_hours <= 8)`
 /// - `chk_attendance_present_zero_absent`: `CHECK (status <> 'PRESENT' OR absent_hours = 0)`
 /// - `trg_attendance_records_validate_integrity`: valida `enrollments.student_id = student_id`, `enrollments.class_id = class_lessons.class_id` e `absent_hours <= class_lessons.workload_hours`
+/// - `trg_attendance_records_prevent_closed_class` (DB-029): executa `fn_prevent_closed_class_mutation()` bloqueando mutações quando a turma está `COMPLETED` ou `ARCHIVED`
 model AttendanceRecord {
   id                String           @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
   lessonId          String           @map("lesson_id") @db.Uuid
@@ -581,8 +595,9 @@ model TaskCriterion {
   criterionName      String        @map("criterion_name") @db.VarChar(180)
   weight             Decimal       @default(1.00) @map("weight") @db.Decimal(3, 2)
   minAcceptableLevel Int           @default(3) @map("min_acceptable_level")
-  task               PracticalTask @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_task_criteria_task")
-  competency         Competency    @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_criteria_competency")
+  task               PracticalTask          @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_task_criteria_task")
+  competency         Competency             @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_criteria_competency")
+  evaluations        SubmissionEvaluation[]
 
   @@unique([taskId, criterionName], map: "uq_task_criteria_name")
   @@index([taskId], map: "idx_task_criteria_task")
@@ -597,6 +612,7 @@ model TaskCriterion {
 /// - `chk_task_submissions_score`: `CHECK (final_task_score IS NULL OR (final_task_score >= 0.00 AND final_task_score <= 10.00))`
 /// - `chk_task_submissions_evidence_url`: `CHECK (evidence_url IS NULL OR evidence_url ~* '^https?://')`
 /// - `trg_task_submissions_validate_and_touch`: exige vínculo `ACTIVE` na turma da tarefa, `final_task_score <= max_score`, impede regressão `EVALUATED -> PENDING` e preenche `completed_at` / `updated_at`
+/// - `trg_task_submissions_prevent_closed_class` (DB-029): executa `fn_prevent_closed_class_mutation()` bloqueando mutações quando a turma está `COMPLETED` ou `ARCHIVED`
 model TaskSubmission {
   id             String           @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
   taskId         String           @map("task_id") @db.Uuid
@@ -609,9 +625,10 @@ model TaskSubmission {
   finalTaskScore Decimal?         @map("final_task_score") @db.Decimal(4, 2)
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime         @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
-  task           PracticalTask    @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_task")
-  student        User             @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_student")
-  enrollment     Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_enrollment")
+  task           PracticalTask          @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_task")
+  student        User                   @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_student")
+  enrollment     Enrollment             @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_enrollment")
+  evaluations    SubmissionEvaluation[]
 
   @@unique([taskId, studentId], map: "uq_task_submissions_task_student")
   @@unique([taskId, enrollmentId], map: "uq_task_submissions_task_enrollment")
@@ -619,4 +636,154 @@ model TaskSubmission {
   @@index([taskId, status], map: "idx_task_submissions_task_status")
   @@index([enrollmentId, status], map: "idx_task_submissions_enrollment_status")
   @@map("task_submissions")
+}
+
+/// Avaliações por rubrica/critério técnico registradas pelos professores em entregas práticas (DB-026)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-026):
+/// - `uq_submission_evaluations_composite`: `UNIQUE (submission_id, criterion_id)`
+/// - `chk_submission_evaluations_level`: `CHECK (achieved_level BETWEEN 1 AND 5)`
+/// - `chk_submission_evaluations_score`: `CHECK (score_awarded >= 0.00 AND score_awarded <= 10.00)`
+/// - `trg_submission_evaluations_validate_integrity`: bloqueia avaliador `STUDENT`, autoavaliação indevida, critério de outra tarefa e `score_awarded > max_score`
+/// - `fn_calculate_submission_consolidated_score` + `trg_submission_evaluations_sync_final_score`: consolida a média ponderada em `task_submissions.final_task_score` e promove status para `EVALUATED`
+/// - `trg_submission_evaluations_prevent_closed_class` (DB-029): executa `fn_prevent_closed_class_mutation()` bloqueando mutações quando a turma está `COMPLETED` ou `ARCHIVED`
+model SubmissionEvaluation {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  submissionId      String         @map("submission_id") @db.Uuid
+  criterionId       String         @map("criterion_id") @db.Uuid
+  evaluatorId       String         @map("evaluator_id") @db.Uuid
+  achievedLevel     Int            @map("achieved_level")
+  scoreAwarded      Decimal        @map("score_awarded") @db.Decimal(4, 2)
+  technicalFeedback String?        @map("technical_feedback") @db.Text
+  evaluatedAt       DateTime       @default(now()) @map("evaluated_at") @db.Timestamptz(6)
+  submission        TaskSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_submission_evaluations_submission")
+  criterion         TaskCriterion  @relation(fields: [criterionId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_submission_evaluations_criterion")
+  evaluator         User           @relation(fields: [evaluatorId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_submission_evaluations_evaluator")
+
+  @@unique([submissionId, criterionId], map: "uq_submission_evaluations_composite")
+  @@index([submissionId], map: "idx_submission_evaluations_submission")
+  @@index([criterionId], map: "idx_submission_evaluations_criterion")
+  @@index([evaluatorId, evaluatedAt], map: "idx_submission_evaluations_evaluator")
+  @@map("submission_evaluations")
+}
+
+/// Avaliações teóricas, microavaliações e projetos formativos aplicados por turma, disciplina e módulo opcional (DB-027)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-027):
+/// - `chk_assessments_weight_positive`: `CHECK (weight > 0.00 AND weight <= 9.99)`
+/// - `chk_assessments_max_grade`: `CHECK (max_grade > 0.00 AND max_grade <= 10.00)`
+/// - `chk_assessments_title_not_blank`: `CHECK (length(btrim(title)) >= 3)`
+/// - `trg_academic_assessments_validate_integrity`: garante `subject.course_id = class.course_id` e `module.subject_id = subject_id` (quando `module_id` informado)
+model AcademicAssessment {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  classId         String          @map("class_id") @db.Uuid
+  subjectId       String          @map("subject_id") @db.Uuid
+  moduleId        String?         @map("module_id") @db.Uuid
+  title           String          @map("title") @db.VarChar(150)
+  assessmentType  AssessmentType  @map("assessment_type")
+  weight          Decimal         @default(1.00) @map("weight") @db.Decimal(3, 2)
+  applicationDate DateTime        @map("application_date") @db.Date
+  maxGrade        Decimal         @default(10.00) @map("max_grade") @db.Decimal(4, 2)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  academicClass   Class           @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_assessments_class")
+  subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_assessments_subject")
+  module          LearningModule? @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_assessments_module")
+  grades          StudentGrade[]
+
+  @@index([classId, subjectId, applicationDate], map: "idx_academic_assessments_class_subject_date")
+  @@index([applicationDate], map: "idx_academic_assessments_application_date")
+  @@index([moduleId], map: "idx_academic_assessments_module")
+  @@index([assessmentType], map: "idx_academic_assessments_type")
+  @@map("academic_assessments")
+}
+
+/// Notas individuais e menções de recuperação obtidas pelos estudantes em avaliações formativas (DB-028)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-028):
+/// - `uq_student_grades_assessment_student`: `UNIQUE (assessment_id, student_id)`
+/// - `uq_student_grades_assessment_enrollment`: `UNIQUE (assessment_id, enrollment_id)`
+/// - `chk_student_grades_value`: `CHECK (grade_value >= 0.00 AND grade_value <= 10.00)`
+/// - `chk_student_grades_recovery`: `CHECK (recovery_grade IS NULL OR (recovery_grade >= 0.00 AND recovery_grade <= 10.00))`
+/// - `trg_student_grades_validate_and_touch`: exige vínculo de matrícula válido/ativo na turma, perfil docente em `recorded_by` e `grade_value`/`recovery_grade <= max_grade`
+/// - `trg_student_grades_audit_update`: registra em `audit_logs` (DB-009) qualquer alteração posterior em nota já publicada
+/// - `trg_student_grades_prevent_closed_class` (DB-029): executa `fn_prevent_closed_class_mutation()` bloqueando mutações quando a turma está `COMPLETED` ou `ARCHIVED`
+model StudentGrade {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  assessmentId  String             @map("assessment_id") @db.Uuid
+  enrollmentId  String             @map("enrollment_id") @db.Uuid
+  studentId     String             @map("student_id") @db.Uuid
+  recordedBy    String             @map("recorded_by") @db.Uuid
+  gradeValue    Decimal            @map("grade_value") @db.Decimal(4, 2)
+  recoveryGrade Decimal?           @map("recovery_grade") @db.Decimal(4, 2)
+  comments      String?            @map("comments") @db.Text
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime           @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  assessment    AcademicAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_grades_assessment")
+  enrollment    Enrollment         @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_grades_enrollment")
+  student       User               @relation("StudentGradeStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_grades_student")
+  recorder      User               @relation("StudentGradeRecorder", fields: [recordedBy], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_grades_recorded_by")
+
+  @@unique([assessmentId, studentId], map: "uq_student_grades_assessment_student")
+  @@unique([assessmentId, enrollmentId], map: "uq_student_grades_assessment_enrollment")
+  @@index([assessmentId], map: "idx_student_grades_assessment")
+  @@index([studentId], map: "idx_student_grades_student")
+  @@index([enrollmentId], map: "idx_student_grades_enrollment")
+  @@index([recordedBy, updatedAt], map: "idx_student_grades_recorded_by")
+  @@map("student_grades")
+}
+
+// =============================================================================
+// 7. AUTOAVALIAÇÃO, EVIDÊNCIAS, ALERTAS E DIAGNÓSTICO 360° (DB-031..DB-040)
+// =============================================================================
+
+/// Ciclos e questionários de autoavaliação de competências práticas por módulo e turma (DB-031)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-031):
+/// - `chk_self_assessment_forms_dates`: `CHECK (opens_at < closes_at)`
+/// - `chk_self_assessment_forms_title_not_blank`: `CHECK (length(btrim(title)) >= 3)`
+/// - `trg_self_assessment_forms_validate_integrity`: garante `module -> subject.course_id = class.course_id` e perfil docente/gestão em `created_by`
+model SelfAssessmentForm {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  moduleId     String         @map("module_id") @db.Uuid
+  classId      String         @map("class_id") @db.Uuid
+  title        String         @map("title") @db.VarChar(150)
+  instructions String?        @map("instructions") @db.Text
+  opensAt      DateTime       @map("opens_at") @db.Timestamptz(6)
+  closesAt     DateTime       @map("closes_at") @db.Timestamptz(6)
+  isActive     Boolean        @default(true) @map("is_active")
+  createdBy    String         @map("created_by") @db.Uuid
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  module       LearningModule          @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_self_assessment_forms_module")
+  class        Class                   @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_self_assessment_forms_class")
+  creator      User                    @relation(fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_self_assessment_forms_creator")
+  responses    StudentSelfAssessment[]
+
+  @@index([classId, isActive], map: "idx_self_assessment_forms_class_active")
+  @@index([classId, isActive, opensAt, closesAt], map: "idx_self_assessment_forms_window")
+  @@index([moduleId], map: "idx_self_assessment_forms_module")
+  @@index([createdBy], map: "idx_self_assessment_forms_creator")
+  @@map("self_assessment_forms")
+}
+
+/// Respostas de autoavaliação de domínio (1..5) e confiança (1..5) declaradas pelo estudante (DB-032)
+/// Constraints nativas PostgreSQL (@check / RLS / Triggers — DB-032):
+/// - `uq_student_self_assessments_composite`: `UNIQUE (form_id, student_id, competency_id)`
+/// - `chk_self_assessments_perceived`: `CHECK (perceived_level BETWEEN 1 AND 5)`
+/// - `chk_self_assessments_confidence`: `CHECK (confidence_score BETWEEN 1 AND 5)`
+/// - `pol_student_self_assessments_student_isolation`: Row-Level Security (RLS) garantindo que um aluno jamais leia/escreva autoavaliação de outro colega
+/// - `trg_student_self_assessments_validate_integrity`: exige perfil `STUDENT`, matrícula `ACTIVE` na turma do formulário, formulário aberto e competência do módulo
+model StudentSelfAssessment {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  formId          String             @map("form_id") @db.Uuid
+  studentId       String             @map("student_id") @db.Uuid
+  competencyId    String             @map("competency_id") @db.Uuid
+  perceivedLevel  Int                @map("perceived_level")
+  confidenceScore Int                @map("confidence_score")
+  difficultyNotes String?            @map("difficulty_notes") @db.Text
+  submittedAt     DateTime           @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  form            SelfAssessmentForm @relation(fields: [formId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_self_assessments_form")
+  student         User               @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_self_assessments_student")
+  competency      Competency         @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_self_assessments_competency")
+
+  @@unique([formId, studentId, competencyId], map: "uq_student_self_assessments_composite")
+  @@index([studentId, competencyId], map: "idx_student_self_assessments_student_competency")
+  @@index([formId, studentId], map: "idx_student_self_assessments_form_student")
+  @@index([competencyId], map: "idx_student_self_assessments_competency")
+  @@map("student_self_assessments")
 }
