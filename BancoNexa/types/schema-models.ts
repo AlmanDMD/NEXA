@@ -4,7 +4,7 @@
  * Sincronizado com `prisma/schema.prisma` (camelCase na aplicação e snake_case no SQL).
  */
 
-import type { ClassStatus, CompetencyCategory, EnrollmentStatus, Role, Shift } from './system-enums';
+import type { AttendanceStatus, ClassStatus, CompetencyCategory, EnrollmentStatus, Role, Shift, SubmissionStatus } from './system-enums';
 
 /** Modelo Prisma `SchemaMigration` mapeado para a tabela PostgreSQL `schema_migrations` */
 export interface SchemaMigration {
@@ -518,3 +518,216 @@ export interface TeacherAssignmentCreateInput {
 
 /** Payload de atualização parcial para `TeacherAssignment` */
 export type TeacherAssignmentUpdateInput = Partial<Omit<TeacherAssignmentCreateInput, 'id'>>;
+
+/** Modelo Prisma `ClassLesson` mapeado para a tabela PostgreSQL `class_lessons` */
+export interface ClassLesson {
+  id: string;
+  classId: string;
+  subjectId: string;
+  moduleId: string | null;
+  teacherId: string;
+  lessonDate: Date;
+  workloadHours: number;
+  topicSummary: string;
+  labEnvironment: string | null;
+  createdAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `class_lessons` */
+export interface ClassLessonRow {
+  id: string;
+  class_id: string;
+  subject_id: string;
+  module_id: string | null;
+  teacher_id: string;
+  lesson_date: Date;
+  workload_hours: number;
+  topic_summary: string;
+  lab_environment: string | null;
+  created_at: Date;
+}
+
+/** Payload de criação para `ClassLesson` */
+export interface ClassLessonCreateInput {
+  id?: string;
+  classId: string;
+  subjectId: string;
+  moduleId?: string | null;
+  teacherId: string;
+  lessonDate: Date;
+  workloadHours?: number;
+  topicSummary: string;
+  labEnvironment?: string | null;
+  createdAt?: Date;
+}
+
+/** Payload de atualização parcial para `ClassLesson` */
+export type ClassLessonUpdateInput = Partial<Omit<ClassLessonCreateInput, 'id'>>;
+
+/** Modelo Prisma `AttendanceRecord` mapeado para a tabela PostgreSQL `attendance_records` */
+export interface AttendanceRecord {
+  id: string;
+  lessonId: string;
+  enrollmentId: string;
+  studentId: string;
+  status: AttendanceStatus;
+  absentHours: number;
+  justificationNote: string | null;
+  recordedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `attendance_records` */
+export interface AttendanceRecordRow {
+  id: string;
+  lesson_id: string;
+  enrollment_id: string;
+  student_id: string;
+  status: AttendanceStatus;
+  absent_hours: number;
+  justification_note: string | null;
+  recorded_at: Date;
+}
+
+/** Payload de criação para `AttendanceRecord` */
+export interface AttendanceRecordCreateInput {
+  id?: string;
+  lessonId: string;
+  enrollmentId: string;
+  studentId: string;
+  status?: AttendanceStatus;
+  absentHours?: number;
+  justificationNote?: string | null;
+  recordedAt?: Date;
+}
+
+/** Payload de atualização parcial para `AttendanceRecord` */
+export type AttendanceRecordUpdateInput = Partial<Omit<AttendanceRecordCreateInput, 'id'>>;
+
+/** Modelo Prisma `PracticalTask` mapeado para a tabela PostgreSQL `practical_tasks` */
+export interface PracticalTask {
+  id: string;
+  moduleId: string;
+  classId: string;
+  title: string;
+  description: string | null;
+  blueprintUrl: string | null;
+  dueDate: Date;
+  maxScore: number | string;
+  isMandatory: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `practical_tasks` */
+export interface PracticalTaskRow {
+  id: string;
+  module_id: string;
+  class_id: string;
+  title: string;
+  description: string | null;
+  blueprint_url: string | null;
+  due_date: Date;
+  max_score: number | string;
+  is_mandatory: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Payload de criação para `PracticalTask` */
+export interface PracticalTaskCreateInput {
+  id?: string;
+  moduleId: string;
+  classId: string;
+  title: string;
+  description?: string | null;
+  blueprintUrl?: string | null;
+  dueDate: Date;
+  maxScore?: number | string;
+  isMandatory?: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/** Payload de atualização parcial para `PracticalTask` */
+export type PracticalTaskUpdateInput = Partial<Omit<PracticalTaskCreateInput, 'id'>>;
+
+/** Modelo Prisma `TaskCriterion` mapeado para a tabela PostgreSQL `task_criteria` */
+export interface TaskCriterion {
+  id: string;
+  taskId: string;
+  competencyId: string;
+  criterionName: string;
+  weight: number | string;
+  minAcceptableLevel: number;
+}
+
+/** Registro SQL snake_case da tabela `task_criteria` */
+export interface TaskCriterionRow {
+  id: string;
+  task_id: string;
+  competency_id: string;
+  criterion_name: string;
+  weight: number | string;
+  min_acceptable_level: number;
+}
+
+/** Payload de criação para `TaskCriterion` */
+export interface TaskCriterionCreateInput {
+  id?: string;
+  taskId: string;
+  competencyId: string;
+  criterionName: string;
+  weight?: number | string;
+  minAcceptableLevel?: number;
+}
+
+/** Payload de atualização parcial para `TaskCriterion` */
+export type TaskCriterionUpdateInput = Partial<Omit<TaskCriterionCreateInput, 'id'>>;
+
+/** Modelo Prisma `TaskSubmission` mapeado para a tabela PostgreSQL `task_submissions` */
+export interface TaskSubmission {
+  id: string;
+  taskId: string;
+  studentId: string;
+  enrollmentId: string;
+  status: SubmissionStatus;
+  completedAt: Date | null;
+  evidenceUrl: string | null;
+  studentNotes: string | null;
+  finalTaskScore: number | string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `task_submissions` */
+export interface TaskSubmissionRow {
+  id: string;
+  task_id: string;
+  student_id: string;
+  enrollment_id: string;
+  status: SubmissionStatus;
+  completed_at: Date | null;
+  evidence_url: string | null;
+  student_notes: string | null;
+  final_task_score: number | string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Payload de criação para `TaskSubmission` */
+export interface TaskSubmissionCreateInput {
+  id?: string;
+  taskId: string;
+  studentId: string;
+  enrollmentId: string;
+  status?: SubmissionStatus;
+  completedAt?: Date | null;
+  evidenceUrl?: string | null;
+  studentNotes?: string | null;
+  finalTaskScore?: number | string | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/** Payload de atualização parcial para `TaskSubmission` */
+export type TaskSubmissionUpdateInput = Partial<Omit<TaskSubmissionCreateInput, 'id'>>;

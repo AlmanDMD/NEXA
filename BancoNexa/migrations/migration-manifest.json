@@ -2,11 +2,11 @@
   "project": "NEXA — Sistema Inteligente de Monitoramento Acadêmico SENAI",
   "databaseEngine": "PostgreSQL 16 Alpine (Docker)",
   "namingConvention": "snake_case (Database) / camelCase (@map Application)",
-  "schemaSha256": "0cae5a0adc9271958b01f98fa0ffae8ec7542d818e89d7a90cb05257dcec1f82",
+  "schemaSha256": "682fbdb6c9244782bb7156c672283a1e916e51fb2a89f2691d53f3c828afed89",
   "logicalModel3fnSha256": "7eb0c74f5c3b302fe652d0f66316ab55a2aff5f151959b2b59da5a23ae3af793",
   "totalTables3fn": 33,
   "totalEnums": 18,
-  "totalPrismaModels": 13,
+  "totalPrismaModels": 18,
   "prismaModels": [
     {
       "name": "SchemaMigration",
@@ -72,6 +72,31 @@
       "name": "TeacherAssignment",
       "tableName": "teacher_assignments",
       "fieldCount": 6
+    },
+    {
+      "name": "ClassLesson",
+      "tableName": "class_lessons",
+      "fieldCount": 10
+    },
+    {
+      "name": "AttendanceRecord",
+      "tableName": "attendance_records",
+      "fieldCount": 8
+    },
+    {
+      "name": "PracticalTask",
+      "tableName": "practical_tasks",
+      "fieldCount": 11
+    },
+    {
+      "name": "TaskCriterion",
+      "tableName": "task_criteria",
+      "fieldCount": 6
+    },
+    {
+      "name": "TaskSubmission",
+      "tableName": "task_submissions",
+      "fieldCount": 11
     }
   ],
   "tables": [
@@ -337,48 +362,73 @@
     },
     {
       "id": "20261118000000_create_courses_table",
-      "checksumSha256": "efd5e135e99c1c98b7bb8a39cbd81ff0a86fd9616e5931c62a3bd2f6c656a486",
+      "checksumSha256": "ab9f836f0680e3f78883656c7a8a3ae531b28d2090aa92e3f5dce1211ac5976b",
       "path": "prisma/migrations/20261118000000_create_courses_table/migration.sql"
     },
     {
       "id": "20261118010000_create_classes_table",
-      "checksumSha256": "211e64206ec3c27efc59cac769ce4282a20b2590dac4cbf430ef0862389abd4d",
+      "checksumSha256": "f843a80b6baa22e0afb7dbb129f530eb07be6a8eb0d77777d7f24e0bf08a9475",
       "path": "prisma/migrations/20261118010000_create_classes_table/migration.sql"
     },
     {
       "id": "20261118020000_create_subjects_table",
-      "checksumSha256": "0fa4756d86132a164670c81ec6992917212fedc24a0a82964c6e2a0123062935",
+      "checksumSha256": "2bd01f108ffcfc775101796758638479beda1c39337b20397df156a608921eea",
       "path": "prisma/migrations/20261118020000_create_subjects_table/migration.sql"
     },
     {
       "id": "20261118030000_create_learning_modules_table",
-      "checksumSha256": "41f864e63fd3e4eb965003a67e92f265922978acfac00ec50c8db78abcbe404a",
+      "checksumSha256": "0ed7f0cc64a0cea7ce731e363f26e79ac7cc0e309b402955f5f477c266816987",
       "path": "prisma/migrations/20261118030000_create_learning_modules_table/migration.sql"
     },
     {
       "id": "20261118040000_create_competencies_table",
-      "checksumSha256": "3e13983d8ef8890fbfaea5d500a9ca9318494b7be7e1d23e91a52ed753e76a4f",
+      "checksumSha256": "07fe2caaff70a3288e57aa32fcb1a154c272d3092596536072921cf03266a627",
       "path": "prisma/migrations/20261118040000_create_competencies_table/migration.sql"
     },
     {
       "id": "20261118050000_create_module_competencies_table",
-      "checksumSha256": "419db5adb486effc9b59985e51cbca4b29c2ff5c9f80eb440781bd257ffc8ca3",
+      "checksumSha256": "884a00dc173d985c9e846f2c23a94675ecb87b35b605054c1f4e634f2ce4337e",
       "path": "prisma/migrations/20261118050000_create_module_competencies_table/migration.sql"
     },
     {
       "id": "20261118060000_create_enrollments_table",
-      "checksumSha256": "a06b01b877b72b08680d70b1b671b18d842b07018e509c81cc590fc46896eba6",
+      "checksumSha256": "4583fbc2d17999d0cdaf51456bade21f17e81fb3ceb7ae627b82e8f88b1651f7",
       "path": "prisma/migrations/20261118060000_create_enrollments_table/migration.sql"
     },
     {
       "id": "20261118070000_create_teacher_assignments_table",
-      "checksumSha256": "c2dda7e7253824298a19308aad8f9acbbf7831f176b8a7e77564f957d1e84cf7",
+      "checksumSha256": "d1e2c7773ca7ae7ac6ce5f3da26f153da54da74635b1188141589c7879c96a44",
       "path": "prisma/migrations/20261118070000_create_teacher_assignments_table/migration.sql"
     },
     {
       "id": "20261118080000_enforce_academic_integrity_constraints",
-      "checksumSha256": "616456075060ebd950e327d5ddccd69c65f8b893ca4bd6d2f50f2a97c29ef9cd",
+      "checksumSha256": "9943cf3fdc04e431cf33ea306f68b4dea18d40bc28d05a6c7c15b12780b66354",
       "path": "prisma/migrations/20261118080000_enforce_academic_integrity_constraints/migration.sql"
+    },
+    {
+      "id": "20261123000000_create_class_lessons_table",
+      "checksumSha256": "819f586869135e103778fb3df5e9ca92497893570f071ca2f7aa338cec2f64fb",
+      "path": "prisma/migrations/20261123000000_create_class_lessons_table/migration.sql"
+    },
+    {
+      "id": "20261123010000_create_attendance_records_table",
+      "checksumSha256": "8122b7d746cd347b4c7c596337cba94bab8b2663f02e42d2663b57208f752542",
+      "path": "prisma/migrations/20261123010000_create_attendance_records_table/migration.sql"
+    },
+    {
+      "id": "20261123020000_create_practical_tasks_table",
+      "checksumSha256": "1c7d9d1fd2e153ff95eef57541a0f04b514850c359974b9bc2e750a0e928893d",
+      "path": "prisma/migrations/20261123020000_create_practical_tasks_table/migration.sql"
+    },
+    {
+      "id": "20261123030000_create_task_criteria_table",
+      "checksumSha256": "a07c6799e508853334867fb7aeaff562f05c5b551d304a63e5c5ea765fce16b5",
+      "path": "prisma/migrations/20261123030000_create_task_criteria_table/migration.sql"
+    },
+    {
+      "id": "20261123040000_create_task_submissions_table",
+      "checksumSha256": "54fef88a096ae68db65efcfcfe798368c818c07adb4a4bb46ec933e3985f190a",
+      "path": "prisma/migrations/20261123040000_create_task_submissions_table/migration.sql"
     }
   ]
 }

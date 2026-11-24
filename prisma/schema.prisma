@@ -1,6 +1,6 @@
 // =============================================================================
 // PROJETO NEXA — SISTEMA INTELIGENTE DE MONITORAMENTO ACADÊMICO SENAI
-// CARDS: [DB-004] a [DB-019] Identidade, Auditoria, Estrutura Curricular, Matrículas e Constraints
+// CARDS: [DB-004] a [DB-025] Identidade, Auditoria, Estrutura Curricular, Diário, Oficinas e Entregas
 // =============================================================================
 // Convenção adotada:
 // - Modelos e Enums em PascalCase na camada de aplicação
@@ -230,6 +230,9 @@ model User {
   auditLogs          AuditLog[]
   enrollments        Enrollment[]
   teacherAssignments TeacherAssignment[]
+  classLessons       ClassLesson[]
+  attendanceRecords  AttendanceRecord[]
+  taskSubmissions    TaskSubmission[]
 
   @@index([email], map: "idx_users_email")
   @@index([role, isActive], map: "idx_users_role_is_active")
@@ -334,6 +337,8 @@ model Class {
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_classes_course")
   enrollments        Enrollment[]
   teacherAssignments TeacherAssignment[]
+  classLessons       ClassLesson[]
+  practicalTasks     PracticalTask[]
 
   @@unique([code, period], map: "uq_classes_code_period")
   @@index([courseId, period], map: "idx_classes_course_period")
@@ -356,6 +361,7 @@ model Subject {
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_subjects_course")
   learningModules    LearningModule[]
   teacherAssignments TeacherAssignment[]
+  classLessons       ClassLesson[]
 
   @@unique([courseId, code], map: "uq_subjects_course_code")
   @@index([name], map: "idx_subjects_name")
@@ -377,6 +383,8 @@ model LearningModule {
   updatedAt      DateTime @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
   subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_learning_modules_subject")
   moduleCompetencies ModuleCompetency[]
+  classLessons       ClassLesson[]
+  practicalTasks     PracticalTask[]
 
   @@unique([subjectId, orderIndex], map: "uq_learning_modules_subject_order")
   @@index([subjectId, orderIndex], map: "idx_learning_modules_subject_order")
@@ -394,6 +402,7 @@ model Competency {
   createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime           @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
   moduleCompetencies ModuleCompetency[]
+  taskCriteria       TaskCriterion[]
 
   @@index([code], map: "idx_competencies_code")
   @@index([category], map: "idx_competencies_category")
@@ -435,8 +444,10 @@ model Enrollment {
   attendanceRate Decimal?         @map("attendance_rate") @db.Decimal(5, 2)
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime         @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
-  student        User             @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_student")
-  class          Class            @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_class")
+  student           User               @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_student")
+  class             Class              @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_enrollments_class")
+  attendanceRecords AttendanceRecord[]
+  taskSubmissions   TaskSubmission[]
 
   @@unique([studentId, classId], map: "uq_enrollments_student_class")
   @@index([attendanceRate], map: "idx_enrollments_attendance_rate")
@@ -462,4 +473,150 @@ model TeacherAssignment {
   @@index([classId, subjectId], map: "idx_teacher_assignments_class_subject")
   @@index([subjectId], map: "idx_teacher_assignments_subject")
   @@map("teacher_assignments")
+}
+
+// =============================================================================
+// 5. TABELAS DE DIÁRIO DE CLASSE: NOTAS & FREQUÊNCIA (DB-021..DB-030)
+// =============================================================================
+
+/// Aulas ministradas e diário de bordo por turma, disciplina e módulo prático SENAI (DB-021)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-021):
+/// - `chk_class_lessons_workload`: `CHECK (workload_hours BETWEEN 1 AND 8)`
+/// - `chk_class_lessons_topic_summary_not_blank`: `CHECK (length(btrim(topic_summary)) > 0)`
+/// - `trg_class_lessons_validate_integrity`: bloqueia `teacher_id` com `role = 'STUDENT'`, valida `subjects.course_id = classes.course_id` e garante `learning_modules.subject_id = subject_id` quando `module_id` é informado
+model ClassLesson {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  classId        String          @map("class_id") @db.Uuid
+  subjectId      String          @map("subject_id") @db.Uuid
+  moduleId       String?         @map("module_id") @db.Uuid
+  teacherId      String          @map("teacher_id") @db.Uuid
+  lessonDate     DateTime        @map("lesson_date") @db.Date
+  workloadHours  Int             @default(4) @map("workload_hours")
+  topicSummary   String          @map("topic_summary") @db.Text
+  labEnvironment String?         @map("lab_environment") @db.VarChar(100)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  class             Class              @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_class_lessons_class")
+  subject           Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_class_lessons_subject")
+  module            LearningModule?    @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_class_lessons_module")
+  teacher           User               @relation(fields: [teacherId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_class_lessons_teacher")
+  attendanceRecords AttendanceRecord[]
+
+  @@index([classId, subjectId, lessonDate], map: "idx_class_lessons_class_subject_date")
+  @@index([moduleId], map: "idx_class_lessons_module")
+  @@index([teacherId], map: "idx_class_lessons_teacher")
+  @@map("class_lessons")
+}
+
+/// Registros atômicos de presença e faltas por estudante em cada aula ministrada (DB-022)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-022):
+/// - `uq_attendance_lesson_student`: `UNIQUE (lesson_id, student_id)` (ancora upsert em lote / chamada em 1 clique)
+/// - `uq_attendance_lesson_enrollment`: `UNIQUE (lesson_id, enrollment_id)`
+/// - `chk_attendance_absent_hours`: `CHECK (absent_hours >= 0 AND absent_hours <= 8)`
+/// - `chk_attendance_present_zero_absent`: `CHECK (status <> 'PRESENT' OR absent_hours = 0)`
+/// - `trg_attendance_records_validate_integrity`: valida `enrollments.student_id = student_id`, `enrollments.class_id = class_lessons.class_id` e `absent_hours <= class_lessons.workload_hours`
+model AttendanceRecord {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  lessonId          String           @map("lesson_id") @db.Uuid
+  enrollmentId      String           @map("enrollment_id") @db.Uuid
+  studentId         String           @map("student_id") @db.Uuid
+  status            AttendanceStatus @default(PRESENT) @map("status")
+  absentHours       Int              @default(0) @map("absent_hours")
+  justificationNote String?          @map("justification_note") @db.Text
+  recordedAt        DateTime         @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  lesson            ClassLesson      @relation(fields: [lessonId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_attendance_lesson")
+  enrollment        Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_attendance_enrollment")
+  student           User             @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_attendance_student")
+
+  @@unique([lessonId, studentId], map: "uq_attendance_lesson_student")
+  @@unique([lessonId, enrollmentId], map: "uq_attendance_lesson_enrollment")
+  @@index([studentId, status], map: "idx_attendance_student_status")
+  @@index([lessonId], map: "idx_attendance_lesson")
+  @@index([enrollmentId, status], map: "idx_attendance_enrollment_status")
+  @@map("attendance_records")
+}
+
+// =============================================================================
+// 6. TABELAS DE ATIVIDADES PRÁTICAS DE OFICINA & COMPETÊNCIAS (DB-023..DB-026)
+// =============================================================================
+
+/// Tarefas e peças práticas de bancada/oficina associadas aos módulos técnicos SENAI e turmas (DB-023)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-023):
+/// - `chk_practical_tasks_max_score`: `CHECK (max_score >= 1.00 AND max_score <= 10.00)`
+/// - `chk_practical_tasks_title_not_blank`: `CHECK (length(btrim(title)) > 0)`
+/// - `chk_practical_tasks_blueprint_url`: `CHECK (blueprint_url IS NULL OR blueprint_url ~* '^https?://')`
+/// - `trg_practical_tasks_validate_and_touch`: garante que o módulo pertença ao mesmo curso da turma e atualiza `updated_at`
+model PracticalTask {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  moduleId     String         @map("module_id") @db.Uuid
+  classId      String         @map("class_id") @db.Uuid
+  title        String         @map("title") @db.VarChar(150)
+  description  String?        @map("description") @db.Text
+  blueprintUrl String?        @map("blueprint_url") @db.VarChar(500)
+  dueDate      DateTime       @map("due_date") @db.Timestamptz(6)
+  maxScore     Decimal        @default(10.00) @map("max_score") @db.Decimal(4, 2)
+  isMandatory  Boolean        @default(true) @map("is_mandatory")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  module       LearningModule   @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_practical_tasks_module")
+  class        Class            @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_practical_tasks_class")
+  criteria     TaskCriterion[]
+  submissions  TaskSubmission[]
+
+  @@index([classId, dueDate], map: "idx_practical_tasks_class_due_date")
+  @@index([moduleId], map: "idx_practical_tasks_module")
+  @@index([classId, isMandatory, dueDate], map: "idx_practical_tasks_class_mandatory_due")
+  @@map("practical_tasks")
+}
+
+/// Critérios técnicos objetivos e rubricas de avaliação prática vinculadas a competências SENAI (DB-024)
+/// Constraints nativas PostgreSQL (@check — DB-024):
+/// - `uq_task_criteria_name`: `UNIQUE (task_id, criterion_name)`
+/// - `chk_task_criteria_weight`: `CHECK (weight > 0.00 AND weight <= 9.99)` (ponderação automática)
+/// - `chk_task_criteria_level`: `CHECK (min_acceptable_level BETWEEN 1 AND 5)`
+/// - `chk_task_criteria_name_not_blank`: `CHECK (length(btrim(criterion_name)) > 0)`
+model TaskCriterion {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  taskId             String        @map("task_id") @db.Uuid
+  competencyId       String        @map("competency_id") @db.Uuid
+  criterionName      String        @map("criterion_name") @db.VarChar(180)
+  weight             Decimal       @default(1.00) @map("weight") @db.Decimal(3, 2)
+  minAcceptableLevel Int           @default(3) @map("min_acceptable_level")
+  task               PracticalTask @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_task_criteria_task")
+  competency         Competency    @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_criteria_competency")
+
+  @@unique([taskId, criterionName], map: "uq_task_criteria_name")
+  @@index([taskId], map: "idx_task_criteria_task")
+  @@index([competencyId], map: "idx_task_criteria_competency")
+  @@map("task_criteria")
+}
+
+/// Submissões e controle de estado de entrega/execução das tarefas práticas por estudante (DB-025)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-025):
+/// - `uq_task_submissions_task_student`: `UNIQUE (task_id, student_id)`
+/// - `uq_task_submissions_task_enrollment`: `UNIQUE (task_id, enrollment_id)`
+/// - `chk_task_submissions_score`: `CHECK (final_task_score IS NULL OR (final_task_score >= 0.00 AND final_task_score <= 10.00))`
+/// - `chk_task_submissions_evidence_url`: `CHECK (evidence_url IS NULL OR evidence_url ~* '^https?://')`
+/// - `trg_task_submissions_validate_and_touch`: exige vínculo `ACTIVE` na turma da tarefa, `final_task_score <= max_score`, impede regressão `EVALUATED -> PENDING` e preenche `completed_at` / `updated_at`
+model TaskSubmission {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  taskId         String           @map("task_id") @db.Uuid
+  studentId      String           @map("student_id") @db.Uuid
+  enrollmentId   String           @map("enrollment_id") @db.Uuid
+  status         SubmissionStatus @default(PENDING) @map("status")
+  completedAt    DateTime?        @map("completed_at") @db.Timestamptz(6)
+  evidenceUrl    String?          @map("evidence_url") @db.VarChar(500)
+  studentNotes   String?          @map("student_notes") @db.Text
+  finalTaskScore Decimal?         @map("final_task_score") @db.Decimal(4, 2)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  task           PracticalTask    @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_task")
+  student        User             @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_student")
+  enrollment     Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_enrollment")
+
+  @@unique([taskId, studentId], map: "uq_task_submissions_task_student")
+  @@unique([taskId, enrollmentId], map: "uq_task_submissions_task_enrollment")
+  @@index([studentId, status], map: "idx_task_submissions_student_status")
+  @@index([taskId, status], map: "idx_task_submissions_task_status")
+  @@index([enrollmentId, status], map: "idx_task_submissions_enrollment_status")
+  @@map("task_submissions")
 }

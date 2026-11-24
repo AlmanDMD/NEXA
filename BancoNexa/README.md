@@ -40,6 +40,18 @@ Este diretório concentra os artefatos, modelos, scripts **SQL nativos (PostgreS
 
 ---
 
+## 📂 Estrutura de Entregáveis (Sprint 3 / Lote 3 — Diário de Classe: Notas & Frequência)
+
+| Card | Entregável | Caminho no Repositório | Status |
+|---|---|---|---|
+| **`DB-021`** | Tabela de Aulas Ministradas e Diário de Bordo (`class_lessons`) | [`BancoNexa/sql/21_tabela_class_lessons.sql`](./sql/21_tabela_class_lessons.sql), [`prisma/migrations/20261123000000_create_class_lessons_table/`](../prisma/migrations/20261123000000_create_class_lessons_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/21-tabela-aulas-ministradas-class-lessons.md`](../docs/banco/21-tabela-aulas-ministradas-class-lessons.md) | ✅ Concluído |
+| **`DB-022`** | Tabela de Registros de Presença e Faltas (`attendance_records`) | [`BancoNexa/sql/22_tabela_attendance_records.sql`](./sql/22_tabela_attendance_records.sql), [`prisma/migrations/20261123010000_create_attendance_records_table/`](../prisma/migrations/20261123010000_create_attendance_records_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/22-tabela-registros-presenca-attendance-records.md`](../docs/banco/22-tabela-registros-presenca-attendance-records.md) | ✅ Concluído |
+| **`DB-023`** | Tabela de Tarefas e Atividades Práticas (`practical_tasks`) | [`BancoNexa/sql/23_tabela_practical_tasks.sql`](./sql/23_tabela_practical_tasks.sql), [`prisma/migrations/20261123020000_create_practical_tasks_table/`](../prisma/migrations/20261123020000_create_practical_tasks_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/23-tabela-tarefas-praticas-practical-tasks.md`](../docs/banco/23-tabela-tarefas-praticas-practical-tasks.md) | ✅ Concluído |
+| **`DB-024`** | Tabela de Critérios de Avaliação Prática / Rubricas (`task_criteria`) | [`BancoNexa/sql/24_tabela_task_criteria.sql`](./sql/24_tabela_task_criteria.sql), [`prisma/migrations/20261123030000_create_task_criteria_table/`](../prisma/migrations/20261123030000_create_task_criteria_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/24-tabela-criterios-avaliacao-pratica-task-criteria.md`](../docs/banco/24-tabela-criterios-avaliacao-pratica-task-criteria.md) | ✅ Concluído |
+| **`DB-025`** | Tabela de Submissões e Entregas Práticas (`task_submissions`) | [`BancoNexa/sql/25_tabela_task_submissions.sql`](./sql/25_tabela_task_submissions.sql), [`prisma/migrations/20261123040000_create_task_submissions_table/`](../prisma/migrations/20261123040000_create_task_submissions_table/), [`BancoNexa/types/schema-models.ts`](./types/schema-models.ts) e [`docs/banco/25-tabela-submissoes-entregas-praticas-task-submissions.md`](../docs/banco/25-tabela-submissoes-entregas-praticas-task-submissions.md) | ✅ Concluído |
+
+---
+
 ## 🧪 Validação Automatizada dos Cards Concluídos
 
 Para executar todos os testes de validação de conformidade dos cards de Banco de Dados na raiz do repositório:
