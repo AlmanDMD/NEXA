@@ -47,6 +47,7 @@ from app.schemas.enums import (
 from app.schemas.user import UserProfileCreateSchema
 from app.services.risk_engine_service import (
     RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE,
+    RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE,
     RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE,
     StudentRiskMetricsInput,
     evaluate_student_risk_rules,
@@ -530,3 +531,248 @@ async def test_risk_engine_integration_all_levels_deduplication_and_auto_resolut
     )
     assert res_404.status_code == status.HTTP_404_NOT_FOUND
     assert res_404.json()["message"] == RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE
+
+
+
+@pytest.mark.asyncio
+async def test_at_risk_students_listing_ordering_filters_pagination_and_rbac(
+    risk_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida GET /api/v1/dashboard/teacher/at-risk: severidade, filtros, paginação, explicabilidade e RBAC (BE-033)."""
+    teacher_a, teacher_a_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="ar033_ta", full_name="Prof Turma A"
+    )
+    teacher_b, _ = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="ar033_tb", full_name="Prof Turma B"
+    )
+    _teacher_c, teacher_c_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.TEACHER, suffix="ar033_tc", full_name="Prof Sem Turma"
+    )
+    _coord, coord_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.COORDINATOR, suffix="ar033_co", full_name="Coordenação"
+    )
+    _adm, adm_token = _create_user_and_token(
+        db_session_factory, fast_hasher, role=UserRole.ADMIN, suffix="ar033_ad", full_name="Admin"
+    )
+    students: list[tuple[User, str]] = [
+        _create_user_and_token(
+            db_session_factory,
+            fast_hasher,
+            role=UserRole.STUDENT,
+            suffix=f"ar033_s{idx}",
+            full_name=name,
+        )
+        for idx, name in enumerate(
+            ("Ana Critica", "Bruno Nota", "Carla Oficina", "Diego Autoavaliacao", "Eva Outra Turma"),
+            start=1,
+        )
+    ]
+    s1, s2, s3, s4, s5 = (s for s, _ in students)
+    student_token = students[0][1]
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-RSK-033",
+            name="Técnico em Mecânica",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        class_repo = AcademicClassRepository(session)
+        class_a = class_repo.create(
+            course_id=course.id,
+            code="MEC-2026-033A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        class_b = class_repo.create(
+            course_id=course.id,
+            code="MEC-2026-033B",
+            period="2026.1",
+            shift=Shift.NIGHT,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="MET-033",
+            name="Metrologia Dimensional",
+            workload_hours=60,
+            syllabus="Instrumentos de medição",
+            is_active=True,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Metrologia",
+            order_index=1,
+            practical_hours=30,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher_a.id, class_id=class_a.id, subject_id=subject.id, is_main_teacher=True
+                ),
+                TeacherAssignment(
+                    teacher_id=teacher_b.id, class_id=class_b.id, subject_id=subject.id, is_main_teacher=True
+                ),
+            ]
+        )
+        enrollments: dict[UUID, Enrollment] = {}
+        for stu, klass in ((s1, class_a), (s2, class_a), (s3, class_a), (s4, class_a), (s5, class_b)):
+            enr = Enrollment(
+                student_id=stu.id,
+                class_id=klass.id,
+                enrollment_date=date(2026, 2, 1),
+                status=EnrollmentStatus.ACTIVE,
+            )
+            session.add(enr)
+            enrollments[stu.id] = enr
+        session.flush()
+
+        def _alert(
+            stu: User,
+            klass_id: UUID,
+            level: RiskLevel,
+            category: AlertCategory,
+            *,
+            module_id: UUID | None = None,
+            alert_status: AlertStatus = AlertStatus.ACTIVE,
+            snapshot: dict[str, Any] | None = None,
+        ) -> AcademicAlert:
+            return AcademicAlert(
+                student_id=stu.id,
+                enrollment_id=enrollments[stu.id].id,
+                class_id=klass_id,
+                module_id=module_id,
+                risk_level=level,
+                alert_category=category,
+                explainable_reason=f"Indicador de atenção pedagógica {category.value} nível {level.value}.",
+                metric_snapshot=snapshot,
+                status=alert_status,
+            )
+
+        # Inserção fora de ordem para garantir que a ordenação seja por severidade
+        session.add_all(
+            [
+                _alert(s4, class_a.id, RiskLevel.LOW, AlertCategory.SELF_EVAL_GAP),
+                _alert(s4, class_a.id, RiskLevel.CRITICAL, AlertCategory.ATTENDANCE, alert_status=AlertStatus.RESOLVED),
+                _alert(s3, class_a.id, RiskLevel.MODERATE, AlertCategory.PENDING_TASKS, module_id=module.id),
+                _alert(
+                    s1,
+                    class_a.id,
+                    RiskLevel.CRITICAL,
+                    AlertCategory.ATTENDANCE,
+                    snapshot={"recommended_action": "Convocar estudante para acolhimento imediato."},
+                ),
+                _alert(s2, class_a.id, RiskLevel.HIGH, AlertCategory.GRADE_DROP, module_id=module.id),
+                _alert(s5, class_b.id, RiskLevel.HIGH, AlertCategory.ATTENDANCE),
+            ]
+        )
+        session.commit()
+
+    url = "/api/v1/dashboard/teacher/at-risk"
+    coord_h = {"Authorization": f"Bearer {coord_token}"}
+
+    # 1. Coordenação: visão global, ordenação CRITICAL -> HIGH -> MODERATE -> LOW e contadores
+    res = await risk_client.get(url, headers=coord_h)
+    assert res.status_code == status.HTTP_200_OK
+    body = res.json()
+    assert body["total"] == 5
+    assert body["page"] == 1
+    assert [i["risk_level"] for i in body["data"]] == ["CRITICAL", "HIGH", "HIGH", "MODERATE", "LOW"]
+    assert (body["critical_count"], body["high_count"], body["moderate_count"], body["low_count"]) == (1, 2, 1, 1)
+    assert "nunca constitui reprovação" in body["ethical_disclaimer"]
+    assert all(i["status"] == "ACTIVE" for i in body["data"])
+
+    critical_item = body["data"][0]
+    assert critical_item["student"]["full_name"] == "Ana Critica"
+    assert critical_item["academic_class"]["code"] == "MEC-2026-033A"
+    assert critical_item["recommended_action"] == "Convocar estudante para acolhimento imediato."
+    assert critical_item["explainable_reason"].startswith("Indicador de atenção pedagógica")
+    assert critical_item["module"] is None
+    assert critical_item["suggested_pedagogical_action"]
+    assert critical_item["ethical_disclaimer"]
+    assert critical_item["alert_id"] == critical_item["id"]
+    metrics = critical_item["current_metrics"]
+    assert set(metrics) >= {
+        "overall_average",
+        "attendance_percentage",
+        "pending_tasks_count",
+        "late_tasks_count",
+        "completed_tasks_count",
+        "active_alerts_count",
+    }
+
+    # 2. Filtro por módulo com ação pedagógica contextual
+    res_mod = await risk_client.get(url, params={"module_id": str(module.id)}, headers=coord_h)
+    assert res_mod.status_code == status.HTTP_200_OK
+    mod_items = res_mod.json()["data"]
+    assert [i["risk_level"] for i in mod_items] == ["HIGH", "MODERATE"]
+    for item in mod_items:
+        assert item["module"]["title"] == "Metrologia"
+        assert item["module"]["subject_code"] == "MET-033"
+        assert item["suggested_pedagogical_action"] == "Agendar mentoria prática no módulo de Metrologia."
+
+    # 3. Filtros por risk_level, alert_category, class_id e busca textual
+    res_high = await risk_client.get(url, params={"risk_level": "HIGH"}, headers=coord_h)
+    assert res_high.json()["total"] == 2
+    res_cat = await risk_client.get(url, params={"alert_category": "ATTENDANCE"}, headers=coord_h)
+    assert [i["risk_level"] for i in res_cat.json()["data"]] == ["CRITICAL", "HIGH"]
+    res_cls = await risk_client.get(url, params={"class_id": str(class_b.id)}, headers=coord_h)
+    assert [i["student_id"] for i in res_cls.json()["data"]] == [str(s5.id)]
+    res_search = await risk_client.get(url, params={"search": "carla"}, headers=coord_h)
+    assert [i["student_id"] for i in res_search.json()["data"]] == [str(s3.id)]
+
+    # 4. Paginação
+    res_page = await risk_client.get(url, params={"page": 2, "limit": 2}, headers=coord_h)
+    page_body = res_page.json()
+    assert page_body["total"] == 5
+    assert page_body["limit"] == 2
+    assert [i["risk_level"] for i in page_body["data"]] == ["HIGH", "MODERATE"]
+
+    # 5. Validações de entrada e 404
+    assert (await risk_client.get(url, params={"risk_level": "EXTREME"}, headers=coord_h)).status_code == (
+        status.HTTP_400_BAD_REQUEST
+    )
+    assert (await risk_client.get(url, params={"limit": 101}, headers=coord_h)).status_code == (
+        status.HTTP_400_BAD_REQUEST
+    )
+    adm_h = {"Authorization": f"Bearer {adm_token}"}
+    res_404_cls = await risk_client.get(url, params={"class_id": str(uuid4())}, headers=adm_h)
+    assert res_404_cls.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404_cls.json()["message"] == RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE
+    res_404_mod = await risk_client.get(url, params={"module_id": str(uuid4())}, headers=adm_h)
+    assert res_404_mod.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404_mod.json()["message"] == RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE
+    assert (await risk_client.get(url, headers=adm_h)).json()["total"] == 5
+
+    # 6. RBAC: professor vê apenas suas turmas
+    ta_h = {"Authorization": f"Bearer {teacher_a_token}"}
+    res_ta = await risk_client.get(url, headers=ta_h)
+    assert res_ta.status_code == status.HTTP_200_OK
+    ta_body = res_ta.json()
+    assert ta_body["total"] == 4
+    assert {i["class_id"] for i in ta_body["data"]} == {str(class_a.id)}
+    assert (ta_body["critical_count"], ta_body["high_count"]) == (1, 1)
+
+    res_ta_other = await risk_client.get(url, params={"class_id": str(class_b.id)}, headers=ta_h)
+    assert res_ta_other.status_code == status.HTTP_403_FORBIDDEN
+    assert res_ta_other.json()["message"] == RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE
+
+    res_tc = await risk_client.get(url, headers={"Authorization": f"Bearer {teacher_c_token}"})
+    assert res_tc.status_code == status.HTTP_403_FORBIDDEN
+
+    assert (
+        await risk_client.get(url, headers={"Authorization": f"Bearer {student_token}"})
+    ).status_code == status.HTTP_403_FORBIDDEN
+    assert (await risk_client.get(url)).status_code == status.HTTP_401_UNAUTHORIZED
