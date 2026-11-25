@@ -22,6 +22,8 @@ from app.repositories.academic_assessment_repository import (
     AcademicAssessmentRepositoryDep,
 )
 from app.repositories.audit_repository import AuditRepository
+from app.repositories.risk_engine_repository import RiskEngineRepository
+from app.services.risk_engine_service import RiskEngineService
 from app.schemas.academic_assessment import (
     AcademicAssessmentCreateSchema,
     AcademicAssessmentListQueryParams,
@@ -875,6 +877,11 @@ class AcademicAssessmentService:
 
         if persist_to_enrollments and updated_enrollments_count > 0:
             self._repository.session.commit()
+
+        if persist_to_enrollments:
+            RiskEngineService(
+                repository=RiskEngineRepository(session=self._repository.session)
+            ).evaluate_class_students_risk(class_id=academic_class.id)
 
         approved_count = sum(
             1

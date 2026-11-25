@@ -20,6 +20,8 @@ from app.repositories.class_lesson_repository import (
     ClassLessonRepository,
     ClassLessonRepositoryDep,
 )
+from app.repositories.risk_engine_repository import RiskEngineRepository
+from app.services.risk_engine_service import RiskEngineService
 from app.schemas.class_lesson import (
     BatchAttendanceRequestSchema,
     BatchAttendanceResponseSchema,
@@ -306,6 +308,12 @@ class ClassLessonService:
         rates_by_student = self._repository.upsert_batch_attendance(
             lesson=lesson,
             normalized_items=normalized_items,
+        )
+        RiskEngineService(
+            repository=RiskEngineRepository(session=self._repository.session)
+        ).evaluate_class_students_risk(
+            class_id=lesson.class_id,
+            student_ids=[enr.student_id for enr, _, _, _ in normalized_items],
         )
 
         updated_enrollments: list[UpdatedEnrollmentAttendanceSchema] = []

@@ -1,0 +1,532 @@
+"""Testes unitários e de integração para o Motor de Identificação Precoce de Risco Acadêmico (BE-032)."""
+
+from collections.abc import AsyncIterator, Generator
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+from uuid import UUID, uuid4
+
+from fastapi import FastAPI, status
+from httpx import ASGITransport, AsyncClient
+import pytest
+import sqlalchemy as sa
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.core import (
+    PasswordHasher,
+    create_access_token,
+    get_db,
+    get_password_hasher,
+)
+from app.main import create_app
+from app.models import (
+    AcademicAlert,
+    Base,
+    Enrollment,
+    TeacherAssignment,
+    User,
+)
+from app.repositories.academic_class_repository import AcademicClassRepository
+from app.repositories.auth_repository import AuthRepository
+from app.repositories.competency_repository import CompetencyRepository
+from app.repositories.course_repository import CourseRepository
+from app.repositories.learning_module_repository import LearningModuleRepository
+from app.repositories.subject_repository import SubjectRepository
+from app.schemas.enums import (
+    AlertCategory,
+    AlertStatus,
+    ClassStatus,
+    CompetencyCategory,
+    EnrollmentStatus,
+    RiskLevel,
+    Shift,
+    UserRole,
+)
+from app.schemas.user import UserProfileCreateSchema
+from app.services.risk_engine_service import (
+    RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE,
+    RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE,
+    StudentRiskMetricsInput,
+    evaluate_student_risk_rules,
+)
+
+
+@pytest.fixture
+def db_engine(tmp_path: Path) -> Generator[sa.Engine, None, None]:
+    """Cria uma engine SQLite isolada por teste com modo WAL e views analíticas."""
+    db_file = tmp_path / "risk_engine_test.db"
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite_pragma(dbapi_connection: Any, _connection_record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
+    Base.metadata.create_all(bind=engine)
+    try:
+        yield engine
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+@pytest.fixture
+def db_session_factory(db_engine: sa.Engine) -> sessionmaker[Session]:
+    """Fábrica de sessões SQLAlchemy vinculada à engine isolada."""
+    return sessionmaker(
+        bind=db_engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+
+@pytest.fixture
+def fast_hasher() -> PasswordHasher:
+    """Hasher rápido para testes."""
+    return PasswordHasher(rounds=4)
+
+
+@pytest.fixture
+def risk_app(
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> FastAPI:
+    """Instância FastAPI configurada com banco isolado."""
+    application = create_app()
+
+    def override_get_db() -> Generator[Session, None, None]:
+        db = db_session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    application.dependency_overrides[get_db] = override_get_db
+    application.dependency_overrides[get_password_hasher] = lambda: fast_hasher
+    return application
+
+
+@pytest.fixture
+async def risk_client(risk_app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """Cliente HTTP assíncrono acoplado à aplicação FastAPI."""
+    transport = ASGITransport(app=risk_app)
+    async with AsyncClient(transport=transport, base_url="https://testserver") as client:
+        yield client
+
+
+def _create_user_and_token(
+    session_factory: sessionmaker[Session],
+    hasher: PasswordHasher,
+    *,
+    role: UserRole,
+    suffix: str,
+    full_name: str,
+) -> tuple[User, str]:
+    """Cria usuário de teste e retorna instância + JWT."""
+    with session_factory() as session:
+        user = AuthRepository(session=session).create_user(
+            email=f"{role.value.lower()}.{suffix}@senai.br",
+            password_hash=hasher.hash_password("Senai@2026!Secret"),
+            role=role,
+            is_active=True,
+            profile_data=UserProfileCreateSchema(
+                full_name=full_name,
+                registration_number=f"SENAI-{role.value[:3]}-{suffix.upper()}",
+                phone="(11) 98888-7777",
+            ),
+        )
+    token = create_access_token(subject=user.id, email=user.email, role=user.role)
+    return user, token
+
+
+class TestRiskEngineDeterministicRulesUnit:
+    """Testes unitários cobrindo todos os graus (LOW, MODERATE, HIGH, CRITICAL), explicabilidade e diretriz ética (BE-032)."""
+
+    def test_low_risk_when_all_metrics_healthy(self) -> None:
+        """Grau LOW: frequência >= 78%, < 2 tarefas atrasadas e média >= passing_score -> nenhum alerta."""
+        risk, rules = evaluate_student_risk_rules(
+            StudentRiskMetricsInput(
+                attendance_percentage=Decimal("85.00"),
+                total_lesson_hours=20,
+                attended_hours=17,
+                absent_hours=3,
+                late_tasks_count=1,
+                total_tasks_count=4,
+                overall_average=Decimal("7.50"),
+                passing_score=Decimal("6.00"),
+            )
+        )
+        assert risk == RiskLevel.LOW
+        assert rules == []
+
+    def test_moderate_risk_when_two_practical_tasks_late(self) -> None:
+        """Grau MODERATE: 2 tarefas práticas em atraso (LATE) com frequência e média normais."""
+        risk, rules = evaluate_student_risk_rules(
+            StudentRiskMetricsInput(
+                attendance_percentage=Decimal("90.00"),
+                late_tasks_count=2,
+                total_tasks_count=5,
+                overall_average=Decimal("8.00"),
+                passing_score=Decimal("6.00"),
+            )
+        )
+        assert risk == RiskLevel.MODERATE
+        assert len(rules) == 1
+        rule = rules[0]
+        assert rule.alert_category == AlertCategory.PENDING_TASKS
+        assert rule.risk_level == RiskLevel.MODERATE
+        assert "2 atividades práticas de oficina em atraso" in rule.explainable_reason
+        assert "não constitui reprovação automática" in rule.explainable_reason
+        assert rule.metric_snapshot["late_tasks_count"] == 2
+        assert "ethical_disclaimer" in rule.metric_snapshot
+
+    @pytest.mark.parametrize("att_rate", [Decimal("75.00"), Decimal("76.50"), Decimal("77.99")])
+    def test_high_risk_when_attendance_in_preventive_band_75_to_78(
+        self,
+        att_rate: Decimal,
+    ) -> None:
+        """Grau HIGH (Regra 1 preventiva): frequência entre 75.00% e 77.99%."""
+        risk, rules = evaluate_student_risk_rules(
+            StudentRiskMetricsInput(
+                attendance_percentage=att_rate,
+                total_lesson_hours=40,
+                attended_hours=31,
+                absent_hours=9,
+            )
+        )
+        assert risk == RiskLevel.HIGH
+        assert len(rules) == 1
+        assert rules[0].alert_category == AlertCategory.ATTENDANCE
+        assert rules[0].risk_level == RiskLevel.HIGH
+        assert str(att_rate) in rules[0].explainable_reason
+
+    def test_high_risk_when_three_or_more_tasks_late_or_grade_below_passing(self) -> None:
+        """Grau HIGH (Regras 2 e 3): >= 3 tarefas atrasadas e média parcial abaixo de passing_score."""
+        risk, rules = evaluate_student_risk_rules(
+            StudentRiskMetricsInput(
+                attendance_percentage=Decimal("92.00"),
+                late_tasks_count=3,
+                total_tasks_count=4,
+                overall_average=Decimal("4.80"),
+                passing_score=Decimal("6.00"),
+            )
+        )
+        assert risk == RiskLevel.HIGH
+        assert len(rules) == 2
+        by_cat = {r.alert_category: r for r in rules}
+        assert by_cat[AlertCategory.PENDING_TASKS].risk_level == RiskLevel.HIGH
+        assert by_cat[AlertCategory.GRADE_DROP].risk_level == RiskLevel.HIGH
+        assert by_cat[AlertCategory.GRADE_DROP].metric_snapshot["grade_deficit"] == "1.20"
+        assert "4.80" in by_cat[AlertCategory.GRADE_DROP].explainable_reason
+
+    @pytest.mark.parametrize("att_rate", [Decimal("74.99"), Decimal("60.00"), Decimal("0.00")])
+    def test_critical_risk_when_attendance_below_75_percent(
+        self,
+        att_rate: Decimal,
+    ) -> None:
+        """Grau CRITICAL (Regra 1 crítica): frequência abaixo de 75.00%."""
+        risk, rules = evaluate_student_risk_rules(
+            StudentRiskMetricsInput(
+                attendance_percentage=att_rate,
+                total_lesson_hours=20,
+                attended_hours=12,
+                absent_hours=8,
+                late_tasks_count=2,
+                overall_average=Decimal("5.00"),
+                passing_score=Decimal("6.00"),
+            )
+        )
+        assert risk == RiskLevel.CRITICAL
+        assert len(rules) == 3
+        by_cat = {r.alert_category: r for r in rules}
+        assert by_cat[AlertCategory.ATTENDANCE].risk_level == RiskLevel.CRITICAL
+        assert "abaixo do limiar mínimo legal de 75.00%" in by_cat[AlertCategory.ATTENDANCE].explainable_reason
+
+
+@pytest.mark.asyncio
+async def test_risk_engine_integration_all_levels_deduplication_and_auto_resolution(
+    risk_client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida integração do RiskEngineService: todos os graus (LOW, MODERATE, HIGH, CRITICAL), sem alertas duplicados e auto-resolução (BE-032)."""
+    teacher, teacher_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="risk032_t",
+        full_name="Instrutor Motor Risco",
+    )
+    stu_low, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="risk032_low",
+        full_name="Aluno Regular Low",
+    )
+    stu_mod, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="risk032_mod",
+        full_name="Aluno Atraso Moderate",
+    )
+    stu_high, _ = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="risk032_high",
+        full_name="Aluno Nota Baixa High",
+    )
+    stu_crit, stu_crit_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.STUDENT,
+        suffix="risk032_crit",
+        full_name="Aluno Faltas Critical",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-RSK-032",
+            name="Técnico em Usinagem Mecânica",
+            description="Curso técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        academic_class = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="USI-2026-032",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        subject = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-032",
+            name="Tornearia Mecânica",
+            workload_hours=80,
+            syllabus="Operações de torno",
+            is_active=True,
+        )
+        module = LearningModuleRepository(session).create(
+            subject_id=subject.id,
+            title="Tornearia de Precisão",
+            order_index=1,
+            practical_hours=40,
+            module_weight=Decimal("1.00"),
+            passing_score=Decimal("6.00"),
+        )
+        comp = CompetencyRepository(session).create(
+            code="COMP-RSK-032",
+            title="Tolerância ISO H7",
+            category=CompetencyCategory.TECHNICAL,
+        )
+        session.add(
+            TeacherAssignment(
+                teacher_id=teacher.id,
+                class_id=academic_class.id,
+                subject_id=subject.id,
+                is_main_teacher=True,
+            )
+        )
+        for stu in (stu_low, stu_mod, stu_high, stu_crit):
+            session.add(
+                Enrollment(
+                    student_id=stu.id,
+                    class_id=academic_class.id,
+                    enrollment_date=date(2026, 2, 1),
+                    status=EnrollmentStatus.ACTIVE,
+                )
+            )
+        session.commit()
+
+    headers = {"Authorization": f"Bearer {teacher_token}"}
+
+    # 1. Cria 2 tarefas práticas com due_date expirado (2020):
+    # Avaliamos stu_low, stu_high e stu_crit nas 2 tarefas (para que não fiquem LATE para eles),
+    # deixando apenas stu_mod com 2 tarefas LATE -> stu_mod terá exatamente grau MODERATE!
+    task_ids_and_crits: list[tuple[UUID, UUID]] = []
+    for idx in (1, 2):
+        res_t = await risk_client.post(
+            "/api/v1/practical-tasks",
+            json={
+                "module_id": str(module.id),
+                "class_id": str(academic_class.id),
+                "title": f"Peça Expirada 0{idx}",
+                "due_date": f"2020-04-1{idx}T18:00:00Z",
+                "max_score": "10.00",
+                "criteria": [
+                    {
+                        "competency_id": str(comp.id),
+                        "criterion_name": f"Medição 0{idx}",
+                        "weight": "1.00",
+                        "min_acceptable_level": 3,
+                    }
+                ],
+            },
+            headers=headers,
+        )
+        assert res_t.status_code == status.HTTP_201_CREATED
+        task_ids_and_crits.append(
+            (UUID(res_t.json()["id"]), UUID(res_t.json()["criteria"][0]["id"]))
+        )
+
+    for tid, cid in task_ids_and_crits:
+        # stu_low e stu_crit tiram nível 4 (8.00 >= 6.00); stu_high tira nível 2 (4.00 < 6.00 -> GRADE_DROP HIGH)
+        for stu_id, lvl in ((stu_low.id, 4), (stu_crit.id, 4), (stu_high.id, 2)):
+            assert (
+                await risk_client.post(
+                    f"/api/v1/tasks/{tid}/evaluations",
+                    json={
+                        "student_id": str(stu_id),
+                        "status": "EVALUATED",
+                        "evaluations": [{"criterion_id": str(cid), "achieved_level": lvl}],
+                    },
+                    headers=headers,
+                )
+            ).status_code == status.HTTP_200_OK
+
+    # 2. Cria aula e registra chamada onde apenas stu_crit falta (0% < 75% -> CRITICAL disparado pelo BE-022!)
+    res_l = await risk_client.post(
+        "/api/v1/lessons",
+        json={
+            "class_id": str(academic_class.id),
+            "subject_id": str(subject.id),
+            "module_id": str(module.id),
+            "lesson_date": "2026-03-15",
+            "workload_hours": 4,
+            "topic_summary": "Aula de bancada",
+        },
+        headers=headers,
+    )
+    assert res_l.status_code == status.HTTP_201_CREATED
+    lesson_id = res_l.json()["id"]
+
+    assert (
+        await risk_client.post(
+            f"/api/v1/lessons/{lesson_id}/attendance",
+            json={
+                "records": [
+                    {"student_id": str(stu_low.id), "status": "PRESENT"},
+                    {"student_id": str(stu_mod.id), "status": "PRESENT"},
+                    {"student_id": str(stu_high.id), "status": "PRESENT"},
+                    {"student_id": str(stu_crit.id), "status": "ABSENT"},
+                ]
+            },
+            headers=headers,
+        )
+    ).status_code == status.HTTP_200_OK
+
+    # 3. Executa avaliação completa da turma via endpoint:
+    # - stu_low -> LOW (100% presença, 0 atrasos, média 8.00)
+    # - stu_mod -> MODERATE (100% presença, 2 tarefas LATE)
+    # - stu_high -> HIGH (100% presença, 0 atrasos, média 4.00 < 6.00)
+    # - stu_crit -> CRITICAL (0% presença < 75%)
+    eval_1 = await risk_client.post(
+        f"/api/v1/dashboard/teacher/classes/{academic_class.id}/evaluate-risk",
+        headers=headers,
+    )
+    assert eval_1.status_code == status.HTTP_200_OK
+    b1 = eval_1.json()
+    assert b1["total_students_evaluated"] == 4
+    assert b1["low_risk_count"] == 1
+    assert b1["moderate_risk_count"] == 1
+    assert b1["high_risk_count"] == 1
+    assert b1["critical_risk_count"] == 1
+    assert b1["at_risk_students_count"] == 3
+
+    # 4. Reexecução idempotente: ZERO novos alertas criados (apenas atualiza os 3 abertos sem duplicar!)
+    eval_2 = await risk_client.post(
+        f"/api/v1/dashboard/teacher/classes/{academic_class.id}/evaluate-risk",
+        headers=headers,
+    )
+    assert eval_2.status_code == status.HTTP_200_OK
+    b2 = eval_2.json()
+    assert b2["created_alerts_count"] == 0
+    assert b2["updated_alerts_count"] == 3
+
+    with db_session_factory() as session:
+        active_alerts = list(
+            session.scalars(
+                select(AcademicAlert).where(
+                    AcademicAlert.class_id == academic_class.id,
+                    AcademicAlert.status == AlertStatus.ACTIVE,
+                )
+            ).all()
+        )
+        assert len(active_alerts) == 3
+        for al in active_alerts:
+            assert len(al.explainable_reason) > 20
+            assert al.metric_snapshot is not None
+            assert "rule_code" in al.metric_snapshot
+
+    # 5. Recuperação automática: retifica chamada de stu_crit para PRESENT -> alerta ATTENDANCE é auto-resolvido!
+    assert (
+        await risk_client.post(
+            f"/api/v1/lessons/{lesson_id}/attendance",
+            json={"records": [{"student_id": str(stu_crit.id), "status": "PRESENT"}]},
+            headers=headers,
+        )
+    ).status_code == status.HTTP_200_OK
+
+    with db_session_factory() as session:
+        crit_alerts = list(
+            session.scalars(
+                select(AcademicAlert).where(AcademicAlert.student_id == stu_crit.id)
+            ).all()
+        )
+        assert len(crit_alerts) == 1
+        assert crit_alerts[0].status == AlertStatus.RESOLVED
+
+    # 6. RBAC e 404 na rota evaluate-risk
+    assert (
+        await risk_client.post(
+            f"/api/v1/dashboard/teacher/classes/{academic_class.id}/evaluate-risk"
+        )
+    ).status_code == status.HTTP_401_UNAUTHORIZED
+    assert (
+        await risk_client.post(
+            f"/api/v1/dashboard/teacher/classes/{academic_class.id}/evaluate-risk",
+            headers={"Authorization": f"Bearer {stu_crit_token}"},
+        )
+    ).status_code == status.HTTP_403_FORBIDDEN
+
+    _other_t, other_t_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.TEACHER,
+        suffix="risk032_out",
+        full_name="Prof Outra Turma",
+    )
+    res_forb = await risk_client.post(
+        f"/api/v1/dashboard/teacher/classes/{academic_class.id}/evaluate-risk",
+        headers={"Authorization": f"Bearer {other_t_token}"},
+    )
+    assert res_forb.status_code == status.HTTP_403_FORBIDDEN
+    assert res_forb.json()["message"] == RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE
+
+    _adm, adm_token = _create_user_and_token(
+        db_session_factory,
+        fast_hasher,
+        role=UserRole.ADMIN,
+        suffix="risk032_adm",
+        full_name="Admin Risk",
+    )
+    res_404 = await risk_client.post(
+        f"/api/v1/dashboard/teacher/classes/{uuid4()}/evaluate-risk",
+        headers={"Authorization": f"Bearer {adm_token}"},
+    )
+    assert res_404.status_code == status.HTTP_404_NOT_FOUND
+    assert res_404.json()["message"] == RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE

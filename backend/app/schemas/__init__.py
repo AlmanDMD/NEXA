@@ -220,6 +220,13 @@ from app.schemas.practical_task import (
     validate_task_criterion_name_pt,
     validate_technical_feedback_pt,
 )
+from app.schemas.risk_engine import (
+    AcademicAlertResponseSchema,
+    ClassRiskEvaluationResponseSchema,
+    ETHICAL_PEDAGOGICAL_DISCLAIMER,
+    RiskRuleEvaluationItemSchema,
+    StudentRiskEvaluationResultSchema,
+)
 from app.schemas.subject import (
     PositiveWorkloadHoursInt,
     SubjectCodeStr,
@@ -269,6 +276,7 @@ from app.schemas.validators import (
 
 __all__ = [
     "AbsentHoursInt",
+    "AcademicAlertResponseSchema",
     "AcademicAssessmentCreateSchema",
     "AcademicAssessmentListParamsDep",
     "AcademicAssessmentListQueryParams",
@@ -307,6 +315,7 @@ __all__ = [
     "ClassLessonListQueryParams",
     "ClassLessonPaginatedResponseSchema",
     "ClassLessonResponseSchema",
+    "ClassRiskEvaluationResponseSchema",
     "ClassStatus",
     "ClassStudentsListParamsDep",
     "ClassStudentsListQueryParams",
@@ -332,6 +341,7 @@ __all__ = [
     "CriterionEvaluationInputSchema",
     "DashboardStudent360SummaryItemSchema",
     "DashboardStudentProfileSchema",
+    "ETHICAL_PEDAGOGICAL_DISCLAIMER",
     "EnrollmentClassSummarySchema",
     "EnrollmentCreateSchema",
     "EnrollmentResponseSchema",
@@ -396,6 +406,7 @@ __all__ = [
     "RegistrationNumberStr",
     "RequiredLevelInt",
     "RiskLevel",
+    "RiskRuleEvaluationItemSchema",
     "SanitizedStr",
     "Shift",
     "SkillEvidenceResponseSchema",
@@ -420,6 +431,7 @@ __all__ = [
     "StudentPendingTasksQueryParams",
     "StudentPendingTasksQueryParamsDep",
     "StudentPendingTasksResponseSchema",
+    "StudentRiskEvaluationResultSchema",
     "StudentSubjectAverageSchema",
     "StudentTaskCountsSummarySchema",
     "SubjectCodeStr",
