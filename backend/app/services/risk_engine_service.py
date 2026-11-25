@@ -19,8 +19,15 @@ from app.repositories.risk_engine_repository import (
     RiskEngineRepositoryDep,
 )
 from app.schemas.enums import AlertCategory, RiskLevel, UserRole
+from app.schemas.dashboard import DashboardStudentProfileSchema
+from app.schemas.enrollment import EnrollmentClassSummarySchema
 from app.schemas.risk_engine import (
     AcademicAlertResponseSchema,
+    AtRiskAlertModuleSummarySchema,
+    AtRiskStudentAlertItemSchema,
+    AtRiskStudentCurrentMetricsSchema,
+    AtRiskStudentsPaginatedResponseSchema,
+    AtRiskStudentsQueryParams,
     ClassRiskEvaluationResponseSchema,
     ETHICAL_PEDAGOGICAL_DISCLAIMER,
     RiskRuleEvaluationItemSchema,
@@ -28,6 +35,60 @@ from app.schemas.risk_engine import (
 )
 
 RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE: Final[str] = "Turma acadêmica não encontrada."
+RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE: Final[str] = (
+    "Módulo de aprendizagem prática não encontrado."
+)
+
+_DEFAULT_RECOMMENDED_ACTIONS: Final[dict[AlertCategory, str]] = {
+    AlertCategory.ATTENDANCE: (
+        "Convocar estudante para acolhimento pedagógico e verificar justificativas de ausência."
+    ),
+    AlertCategory.PENDING_TASKS: (
+        "Agendar horário de apoio prático em bancada/oficina para regularização das entregas pendentes."
+    ),
+    AlertCategory.GRADE_DROP: (
+        "Oferecer recuperação paralela e mentoria focada nos critérios técnicos com menor pontuação."
+    ),
+    AlertCategory.SELF_EVAL_GAP: (
+        "Realizar devolutiva individual comparando autoavaliação e avaliação docente."
+    ),
+}
+
+_GENERIC_PEDAGOGICAL_ACTIONS: Final[dict[AlertCategory, str]] = {
+    AlertCategory.ATTENDANCE: "Realizar acolhimento de frequência e plano de reposição de aulas.",
+    AlertCategory.PENDING_TASKS: "Agendar mentoria prática em oficina para regularizar entregas atrasadas.",
+    AlertCategory.GRADE_DROP: "Agendar recuperação paralela com mentoria técnica individual.",
+    AlertCategory.SELF_EVAL_GAP: "Agendar devolutiva individual sobre autoavaliação de competências.",
+}
+
+
+def _resolve_pedagogical_actions(alert: AcademicAlert) -> tuple[str, str]:
+    """Deriva (recommended_action, suggested_pedagogical_action) explicáveis para o alerta (BE-033)."""
+    snapshot = alert.metric_snapshot or {}
+    raw_action = snapshot.get("recommended_action")
+    recommended = (
+        raw_action.strip()
+        if isinstance(raw_action, str) and raw_action.strip()
+        else _DEFAULT_RECOMMENDED_ACTIONS.get(
+            alert.alert_category,
+            "Realizar acompanhamento pedagógico individualizado.",
+        )
+    )
+
+    module = alert.module
+    if module is not None:
+        if alert.alert_category == AlertCategory.ATTENDANCE:
+            suggested = (
+                f"Realizar acolhimento de frequência e plano de reposição no módulo de {module.title}."
+            )
+        else:
+            suggested = f"Agendar mentoria prática no módulo de {module.title}."
+    else:
+        suggested = _GENERIC_PEDAGOGICAL_ACTIONS.get(
+            alert.alert_category,
+            "Agendar acompanhamento pedagógico individual.",
+        )
+    return recommended, suggested
 RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE: Final[str] = (
     "Acesso não autorizado: professor não possui atribuição ativa nesta turma."
 )
@@ -561,6 +622,131 @@ class RiskEngineService:
             results=results,
         )
 
+    def list_at_risk_students(
+        self,
+        params: AtRiskStudentsQueryParams,
+        *,
+        current_user: User,
+    ) -> AtRiskStudentsPaginatedResponseSchema:
+        """Lista alertas ativos paginados e ordenados por severidade com RBAC docente (BE-033)."""
+        if params.class_id is not None:
+            if self._repository.get_class_by_id(params.class_id) is None:
+                raise NotFoundException(message=RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE)
+
+        if params.module_id is not None:
+            if self._repository.get_module_by_id(params.module_id) is None:
+                raise NotFoundException(message=RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE)
+
+        allowed_class_ids: list[UUID] | None = None
+        if current_user.role == UserRole.TEACHER:
+            assigned = self._repository.get_teacher_assigned_class_ids(current_user.id)
+            if not assigned:
+                raise ForbiddenException(message=RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE)
+            if params.class_id is not None and params.class_id not in assigned:
+                raise ForbiddenException(message=RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE)
+            allowed_class_ids = list(assigned)
+
+        items, total, counts = self._repository.list_active_at_risk_alerts(
+            page=params.page,
+            limit=params.limit,
+            class_id=params.class_id,
+            allowed_class_ids=allowed_class_ids,
+            module_id=params.module_id,
+            risk_level=params.risk_level,
+            alert_category=params.alert_category,
+            search=params.search,
+        )
+
+        metrics_by_enr = self._repository.query_current_metrics_by_enrollment_ids(
+            [a.enrollment_id for a in items]
+        )
+
+        data: list[AtRiskStudentAlertItemSchema] = []
+        for alert in items:
+            row = metrics_by_enr.get(alert.enrollment_id, {})
+            parsed_att = _to_dec_or_none(row.get("attendance_percentage"))
+            att_pct = parsed_att if parsed_att is not None else Decimal("100.00")
+            current_metrics = AtRiskStudentCurrentMetricsSchema(
+                overall_average=_to_dec_or_none(row.get("overall_average")),
+                attendance_percentage=att_pct,
+                pending_tasks_count=int(row.get("pending_tasks_count") or 0),
+                late_tasks_count=int(row.get("late_tasks_count") or 0),
+                completed_tasks_count=int(row.get("completed_tasks_count") or 0),
+                active_alerts_count=int(row.get("active_alerts_count") or 0),
+            )
+
+            student = alert.student
+            profile = student.profile
+            klass = alert.academic_class
+            module = alert.module
+            module_summary = (
+                AtRiskAlertModuleSummarySchema(
+                    id=module.id,
+                    title=module.title,
+                    order_index=module.order_index,
+                    subject_id=module.subject_id,
+                    subject_code=module.subject.code,
+                    subject_name=module.subject.name,
+                )
+                if module is not None
+                else None
+            )
+            recommended, suggested = _resolve_pedagogical_actions(alert)
+
+            data.append(
+                AtRiskStudentAlertItemSchema(
+                    id=alert.id,
+                    alert_id=alert.id,
+                    student_id=alert.student_id,
+                    enrollment_id=alert.enrollment_id,
+                    class_id=alert.class_id,
+                    module_id=alert.module_id,
+                    risk_level=alert.risk_level,
+                    alert_category=alert.alert_category,
+                    status=alert.status,
+                    explainable_reason=alert.explainable_reason,
+                    recommended_action=recommended,
+                    suggested_pedagogical_action=suggested,
+                    ethical_disclaimer=ETHICAL_PEDAGOGICAL_DISCLAIMER,
+                    metric_snapshot=alert.metric_snapshot,
+                    current_metrics=current_metrics,
+                    student=DashboardStudentProfileSchema(
+                        id=student.id,
+                        email=student.email,
+                        full_name=profile.full_name if profile is not None else None,
+                        registration_number=(
+                            profile.registration_number if profile is not None else None
+                        ),
+                        avatar_url=profile.avatar_url if profile is not None else None,
+                    ),
+                    academic_class=EnrollmentClassSummarySchema(
+                        id=klass.id,
+                        course_id=klass.course_id,
+                        code=klass.code,
+                        period=klass.period,
+                        shift=klass.shift,
+                        max_students=klass.max_students,
+                        status=klass.status,
+                        start_date=klass.start_date,
+                        end_date=klass.end_date,
+                    ),
+                    module=module_summary,
+                    created_at=alert.created_at,
+                )
+            )
+
+        return AtRiskStudentsPaginatedResponseSchema(
+            data=data,
+            total=total,
+            page=params.page,
+            limit=params.limit,
+            critical_count=counts.get(RiskLevel.CRITICAL, 0),
+            high_count=counts.get(RiskLevel.HIGH, 0),
+            moderate_count=counts.get(RiskLevel.MODERATE, 0),
+            low_count=counts.get(RiskLevel.LOW, 0),
+            ethical_disclaimer=ETHICAL_PEDAGOGICAL_DISCLAIMER,
+        )
+
 
 def get_risk_engine_service(
     repository: RiskEngineRepositoryDep,
@@ -581,6 +767,7 @@ __all__ = [
     "LATE_TASKS_HIGH_THRESHOLD",
     "LATE_TASKS_MODERATE_THRESHOLD",
     "RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE",
+    "RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE",
     "RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE",
     "RiskEngineService",
     "RiskEngineServiceDep",
