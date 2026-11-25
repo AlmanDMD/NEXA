@@ -89,8 +89,27 @@ class AcademicStandingStatus(StrEnum):
     AT_RISK = "AT_RISK"
 
 
+class AlertCategory(StrEnum):
+    """Categorias de alertas precoces de risco acadêmico — 'alert_category_enum' (DB-034)."""
+
+    ATTENDANCE = "ATTENDANCE"
+    GRADE_DROP = "GRADE_DROP"
+    PENDING_TASKS = "PENDING_TASKS"
+    SELF_EVAL_GAP = "SELF_EVAL_GAP"
+
+
+class AlertStatus(StrEnum):
+    """Status do ciclo de acompanhamento de alertas acadêmicos — 'alert_status_enum' (DB-034)."""
+
+    ACTIVE = "ACTIVE"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    RESOLVED = "RESOLVED"
+
+
 __all__ = [
     "AcademicStandingStatus",
+    "AlertCategory",
+    "AlertStatus",
     "AssessmentType",
     "AttendanceStatus",
     "ClassStatus",
