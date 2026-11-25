@@ -222,6 +222,11 @@ from app.schemas.practical_task import (
 )
 from app.schemas.risk_engine import (
     AcademicAlertResponseSchema,
+    AtRiskAlertModuleSummarySchema,
+    AtRiskStudentAlertItemSchema,
+    AtRiskStudentCurrentMetricsSchema,
+    AtRiskStudentsPaginatedResponseSchema,
+    AtRiskStudentsQueryParams,
     ClassRiskEvaluationResponseSchema,
     ETHICAL_PEDAGOGICAL_DISCLAIMER,
     RiskRuleEvaluationItemSchema,
@@ -315,6 +320,11 @@ __all__ = [
     "ClassLessonListQueryParams",
     "ClassLessonPaginatedResponseSchema",
     "ClassLessonResponseSchema",
+    "AtRiskAlertModuleSummarySchema",
+    "AtRiskStudentAlertItemSchema",
+    "AtRiskStudentCurrentMetricsSchema",
+    "AtRiskStudentsPaginatedResponseSchema",
+    "AtRiskStudentsQueryParams",
     "ClassRiskEvaluationResponseSchema",
     "ClassStatus",
     "ClassStudentsListParamsDep",

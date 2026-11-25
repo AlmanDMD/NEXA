@@ -6,8 +6,8 @@ from uuid import UUID
 
 from fastapi import Depends
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import inspect, select, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import case, func, inspect, or_, select, text
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_alert import (
@@ -21,7 +21,14 @@ from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
+from app.models.user import User, UserProfile
 from app.schemas.enums import AlertCategory, AlertStatus, EnrollmentStatus, RiskLevel
+
+
+def _build_ilike_pattern(term: str) -> str:
+    """Escapa caracteres curinga (% e _) para busca parcial segura."""
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 class RiskEngineRepository:
@@ -198,6 +205,125 @@ class RiskEngineRepository:
     def commit(self) -> None:
         """Efetiva a transação no banco de dados."""
         self._session.commit()
+
+    def get_module_by_id(self, module_id: UUID) -> LearningModule | None:
+        """Busca um módulo prático pelo UUID carregando a disciplina associada."""
+        stmt = (
+            select(LearningModule)
+            .options(joinedload(LearningModule.subject))
+            .where(LearningModule.id == module_id)
+        )
+        return self._session.scalar(stmt)
+
+    def get_teacher_assigned_class_ids(self, teacher_id: UUID) -> set[UUID]:
+        """Retorna os UUIDs de todas as turmas atribuídas ao docente."""
+        stmt = select(TeacherAssignment.class_id).where(
+            TeacherAssignment.teacher_id == teacher_id
+        )
+        return set(self._session.scalars(stmt).all())
+
+    def list_active_at_risk_alerts(
+        self,
+        *,
+        page: int,
+        limit: int,
+        class_id: UUID | None = None,
+        allowed_class_ids: Sequence[UUID] | None = None,
+        module_id: UUID | None = None,
+        risk_level: RiskLevel | None = None,
+        alert_category: AlertCategory | None = None,
+        search: str | None = None,
+    ) -> tuple[list[AcademicAlert], int, dict[RiskLevel, int]]:
+        """Lista alertas ativos paginados e ordenados por severidade (CRITICAL -> HIGH -> MODERATE -> LOW) (BE-033)."""
+        stmt = select(AcademicAlert).where(AcademicAlert.status == AlertStatus.ACTIVE)
+
+        if class_id is not None:
+            stmt = stmt.where(AcademicAlert.class_id == class_id)
+
+        if allowed_class_ids is not None:
+            allowed_list = list(dict.fromkeys(allowed_class_ids))
+            if not allowed_list:
+                return [], 0, {}
+            stmt = stmt.where(AcademicAlert.class_id.in_(allowed_list))
+
+        if module_id is not None:
+            stmt = stmt.where(AcademicAlert.module_id == module_id)
+
+        if risk_level is not None:
+            stmt = stmt.where(AcademicAlert.risk_level == risk_level)
+
+        if alert_category is not None:
+            stmt = stmt.where(AcademicAlert.alert_category == alert_category)
+
+        if search:
+            pattern = _build_ilike_pattern(search)
+            stmt = (
+                stmt.join(User, User.id == AcademicAlert.student_id)
+                .outerjoin(UserProfile, UserProfile.user_id == User.id)
+                .where(
+                    or_(
+                        User.email.ilike(pattern, escape="\\"),
+                        UserProfile.full_name.ilike(pattern, escape="\\"),
+                        UserProfile.registration_number.ilike(pattern, escape="\\"),
+                        AcademicAlert.explainable_reason.ilike(pattern, escape="\\"),
+                    )
+                )
+            )
+
+        total = int(
+            self._session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        )
+
+        # Contagem por severidade sobre o mesmo escopo filtrado
+        filtered_subq = stmt.subquery()
+        counts_stmt = select(
+            filtered_subq.c.risk_level,
+            func.count(),
+        ).group_by(filtered_subq.c.risk_level)
+        counts_by_risk: dict[RiskLevel, int] = {}
+        for raw_lvl, count_val in self._session.execute(counts_stmt).all():
+            lvl = raw_lvl if isinstance(raw_lvl, RiskLevel) else RiskLevel(str(raw_lvl))
+            counts_by_risk[lvl] = int(count_val)
+
+        severity_order = case(
+            (AcademicAlert.risk_level == RiskLevel.CRITICAL, 1),
+            (AcademicAlert.risk_level == RiskLevel.HIGH, 2),
+            (AcademicAlert.risk_level == RiskLevel.MODERATE, 3),
+            (AcademicAlert.risk_level == RiskLevel.LOW, 4),
+            else_=5,
+        )
+
+        offset = (page - 1) * limit
+        items_stmt = (
+            stmt.options(
+                joinedload(AcademicAlert.student).selectinload(User.profile),
+                joinedload(AcademicAlert.academic_class),
+                joinedload(AcademicAlert.module).joinedload(LearningModule.subject),
+            )
+            .order_by(
+                severity_order.asc(),
+                AcademicAlert.created_at.desc(),
+                AcademicAlert.id.asc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        items = list(self._session.scalars(items_stmt).unique().all())
+        return items, total, counts_by_risk
+
+    def query_current_metrics_by_enrollment_ids(
+        self,
+        enrollment_ids: Sequence[UUID],
+    ) -> dict[UUID, dict[str, Any]]:
+        """Busca em lote as métricas atuais em vw_student_360_performance para um conjunto de matrículas."""
+        target_ids = list(dict.fromkeys(enrollment_ids))
+        if not target_ids:
+            return {}
+        self.ensure_student_360_view()
+        vw = vw_student_360_performance_table
+        stmt = select(vw).where(vw.c.enrollment_id.in_(target_ids))
+        rows = self._session.execute(stmt).mappings().all()
+        return {UUID(str(row["enrollment_id"])): dict(row) for row in rows}
 
 
 def get_risk_engine_repository(session: DbSessionDep) -> RiskEngineRepository:

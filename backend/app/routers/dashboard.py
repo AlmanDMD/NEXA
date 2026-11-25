@@ -14,7 +14,11 @@ from app.schemas.dashboard import (
     TeacherClassDashboardResponseSchema,
 )
 from app.schemas.enums import UserRole
-from app.schemas.risk_engine import ClassRiskEvaluationResponseSchema
+from app.schemas.risk_engine import (
+    AtRiskStudentsPaginatedResponseSchema,
+    AtRiskStudentsParamsDep,
+    ClassRiskEvaluationResponseSchema,
+)
 from app.services.dashboard_service import DashboardServiceDep
 from app.services.risk_engine_service import RiskEngineServiceDep
 
@@ -87,6 +91,27 @@ async def evaluate_class_academic_risk(
     """Analisa frequência, entregas práticas e médias da turma gravando/atualizando academic_alerts sem duplicidade."""
     return risk_engine_service.evaluate_class_risk(
         class_id,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/dashboard/teacher/at-risk",
+    response_model=AtRiskStudentsPaginatedResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Listar alunos em risco acadêmico com justificativa explicável e ação pedagógica sugerida",
+)
+async def list_at_risk_students(
+    params: AtRiskStudentsParamsDep,
+    risk_engine_service: RiskEngineServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> AtRiskStudentsPaginatedResponseSchema:
+    """Retorna alertas ativos paginados, filtráveis e ordenados por severidade (CRITICAL -> LOW)."""
+    return risk_engine_service.list_at_risk_students(
+        params,
         current_user=current_user,
     )
 
