@@ -323,3 +323,4 @@ O NEXA não compete com sistemas de gestão escolar generalistas (como sistemas 
 *Documento elaborado pela Squad de Documentação — Projeto Integrador SENAI.*  
 *Referência: DOC-001 | Epic: EPIC-01 | Sprint S1*  
 *Próximo documento: [DOC-002 — Especificação de Requisitos Funcionais e Não-Funcionais](./requisitos.md)*
+
