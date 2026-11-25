@@ -1,5 +1,12 @@
 """Camada de models (entidades de domínio / persistência SQLAlchemy 2.0)."""
 
+from app.models.academic_alert import (
+    AcademicAlert,
+    VW_STUDENT_360_PERFORMANCE_CREATE_SQL,
+    VW_STUDENT_360_PERFORMANCE_DROP_SQL,
+    VW_STUDENT_360_PERFORMANCE_NAME,
+    vw_student_360_performance_table,
+)
 from app.models.academic_assessment import AcademicAssessment, StudentGrade
 from app.models.academic_class import AcademicClass
 from app.models.audit_log import AuditLog
@@ -30,6 +37,7 @@ from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User, UserProfile
 
 __all__ = [
+    "AcademicAlert",
     "AcademicAssessment",
     "AcademicClass",
     "AttendanceRecord",
@@ -57,5 +65,9 @@ __all__ = [
     "VW_MODULE_ATTENDANCE_RISK_CREATE_SQL",
     "VW_MODULE_ATTENDANCE_RISK_DROP_SQL",
     "VW_MODULE_ATTENDANCE_RISK_NAME",
+    "VW_STUDENT_360_PERFORMANCE_CREATE_SQL",
+    "VW_STUDENT_360_PERFORMANCE_DROP_SQL",
+    "VW_STUDENT_360_PERFORMANCE_NAME",
     "vw_module_attendance_risk_table",
+    "vw_student_360_performance_table",
 ]
