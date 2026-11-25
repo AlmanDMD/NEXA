@@ -14,7 +14,9 @@ from app.schemas.dashboard import (
     TeacherClassDashboardResponseSchema,
 )
 from app.schemas.enums import UserRole
+from app.schemas.risk_engine import ClassRiskEvaluationResponseSchema
 from app.services.dashboard_service import DashboardServiceDep
+from app.services.risk_engine_service import RiskEngineServiceDep
 
 router = APIRouter(
     prefix="/api/v1",
@@ -64,6 +66,27 @@ async def get_student_360_overview(
     return dashboard_service.get_student_360_overview(
         student_id,
         params,
+        current_user=current_user,
+    )
+
+
+@router.post(
+    "/dashboard/teacher/classes/{class_id}/evaluate-risk",
+    response_model=ClassRiskEvaluationResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Executar Motor Explicável de Identificação Precoce de Risco Acadêmico na turma",
+)
+async def evaluate_class_academic_risk(
+    class_id: UUIDPathParam,
+    risk_engine_service: RiskEngineServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> ClassRiskEvaluationResponseSchema:
+    """Analisa frequência, entregas práticas e médias da turma gravando/atualizando academic_alerts sem duplicidade."""
+    return risk_engine_service.evaluate_class_risk(
+        class_id,
         current_user=current_user,
     )
 

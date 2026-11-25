@@ -117,8 +117,9 @@ class DashboardService:
     ) -> DashboardStudent360SummaryItemSchema:
         """Converte uma linha da view vw_student_360_performance em DashboardStudent360SummaryItemSchema."""
         overall_avg = _to_decimal_or_none(row.get("overall_average"))
-        attendance_pct = _to_decimal_or_none(row.get("attendance_percentage")) or Decimal(
-            "100.00"
+        parsed_att = _to_decimal_or_none(row.get("attendance_percentage"))
+        attendance_pct = (
+            parsed_att if parsed_att is not None else Decimal("100.00")
         )
         total_tasks = int(row.get("total_tasks_count") or 0)
         pending_tasks = int(row.get("pending_tasks_count") or 0)
@@ -333,8 +334,9 @@ class DashboardService:
         for att_row in mod_attendance_rows:
             m_id = UUID(str(att_row["module_id"]))
             s_id = UUID(str(att_row["student_id"]))
-            pct = _to_decimal_or_none(att_row.get("attendance_percentage")) or Decimal(
-                "100.00"
+            parsed_mod_pct = _to_decimal_or_none(att_row.get("attendance_percentage"))
+            pct = (
+                parsed_mod_pct if parsed_mod_pct is not None else Decimal("100.00")
             )
             is_crit = bool(att_row.get("is_attendance_critical"))
             att_by_module.setdefault(m_id, []).append((s_id, pct, is_crit))

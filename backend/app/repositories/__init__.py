@@ -55,6 +55,11 @@ from app.repositories.practical_task_repository import (
     PracticalTaskRepositoryDep,
     get_practical_task_repository,
 )
+from app.repositories.risk_engine_repository import (
+    RiskEngineRepository,
+    RiskEngineRepositoryDep,
+    get_risk_engine_repository,
+)
 from app.repositories.subject_repository import (
     SubjectRepository,
     SubjectRepositoryDep,
@@ -89,6 +94,8 @@ __all__ = [
     "LearningModuleRepositoryDep",
     "PracticalTaskRepository",
     "PracticalTaskRepositoryDep",
+    "RiskEngineRepository",
+    "RiskEngineRepositoryDep",
     "SubjectRepository",
     "SubjectRepositoryDep",
     "TeacherAssignmentRepository",
@@ -104,6 +111,7 @@ __all__ = [
     "get_enrollment_repository",
     "get_learning_module_repository",
     "get_practical_task_repository",
+    "get_risk_engine_repository",
     "get_subject_repository",
     "get_teacher_assignment_repository",
 ]

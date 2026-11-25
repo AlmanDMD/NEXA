@@ -21,6 +21,8 @@ from app.repositories.practical_task_repository import (
     PracticalTaskRepository,
     PracticalTaskRepositoryDep,
 )
+from app.repositories.risk_engine_repository import RiskEngineRepository
+from app.services.risk_engine_service import RiskEngineService
 from app.schemas.class_lesson import (
     LessonModuleSummarySchema,
     LessonSubjectSummarySchema,
@@ -377,6 +379,9 @@ class PracticalTaskService:
             evidence_url=payload.evidence_url,
             student_notes=payload.student_notes,
         )
+        RiskEngineService(
+            repository=RiskEngineRepository(session=self._repository.session)
+        ).evaluate_student_enrollment_risk(enrollment_id=enrollment.id)
 
         evaluations_response = [
             SubmissionCriterionEvaluationResponseSchema(
