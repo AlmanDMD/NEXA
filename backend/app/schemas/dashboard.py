@@ -10,7 +10,10 @@ from pydantic import Field, field_validator
 
 from app.schemas.academic_assessment import StudentSubjectAverageSchema
 from app.schemas.base import BaseResponseSchema, StrictRequestSchema
-from app.schemas.class_lesson import ModuleAttendanceRiskItemSchema
+from app.schemas.class_lesson import (
+    ModuleAttendanceRiskItemSchema,
+    SubjectConsolidatedAttendanceSchema,
+)
 from app.schemas.enrollment import EnrollmentClassSummarySchema
 from app.schemas.enums import (
     AcademicStandingStatus,
@@ -18,9 +21,13 @@ from app.schemas.enums import (
     AlertStatus,
     CompetencyCategory,
     EnrollmentStatus,
+    MilestoneType,
     RiskLevel,
 )
-from app.schemas.practical_task import StudentPendingTaskItemSchema
+from app.schemas.practical_task import (
+    StudentPendingTaskItemSchema,
+    StudentTaskCountsSummarySchema,
+)
 
 _DECIMAL_QUANTIZER: Decimal = Decimal("0.01")
 
@@ -54,6 +61,21 @@ class Student360QueryParams(StrictRequestSchema):
 
 
 type Student360ParamsDep = Annotated[Student360QueryParams, Query()]
+
+
+class StudentPortalDashboardQueryParams(StrictRequestSchema):
+    """Filtros opcionais para o Portal do Aluno (GET /api/v1/dashboard/student/me - BE-034)."""
+
+    class_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da turma acadêmica do estudante",
+    )
+
+
+type StudentPortalDashboardParamsDep = Annotated[
+    StudentPortalDashboardQueryParams,
+    Query(),
+]
 
 
 class DashboardStudentProfileSchema(BaseResponseSchema):
@@ -412,6 +434,359 @@ class Student360OverviewResponseSchema(BaseResponseSchema):
     )
 
 
+class StudentPortalAttendanceSummarySchema(BaseResponseSchema):
+    """Resumo consolidado de frequência do estudante para o Portal de Autonomia (BE-034 / FE-035 / FE-037)."""
+
+    planned_hours: int = Field(
+        ge=0,
+        description="Carga horária total prevista nas disciplinas/módulos da turma",
+    )
+    total_hours: int = Field(
+        ge=0,
+        description="Total de horas-aula ministradas até o momento",
+    )
+    attended_hours: int = Field(
+        ge=0,
+        description="Total de horas com presença registrada para o estudante",
+    )
+    absent_hours: int = Field(
+        ge=0,
+        description="Total de horas de faltas não justificadas",
+    )
+    justified_absent_hours: int = Field(
+        ge=0,
+        description="Total de horas de ausências justificadas (JUSTIFIED)",
+    )
+    attendance_percentage: Decimal = Field(
+        description="Percentual consolidado de presença do estudante (0.00 a 100.00%)",
+    )
+    min_required_percentage: Decimal = Field(
+        description="Percentual mínimo legal exigido para aprovação por frequência (75.00%)",
+    )
+    max_allowed_absent_hours: Decimal = Field(
+        description="Limite máximo de horas de falta (25%) sobre as aulas ministradas",
+    )
+    remaining_absent_hours_margin: Decimal = Field(
+        description="Margem restante em horas sobre as aulas ministradas até o limite de 75%",
+    )
+    planned_max_allowed_absent_hours: Decimal = Field(
+        description="Limite máximo de horas de falta (25%) sobre a carga horária prevista",
+    )
+    planned_remaining_absent_hours_margin: Decimal = Field(
+        description="Saldo restante em horas que o estudante ainda pode faltar na carga prevista antes de 75%",
+    )
+    percentage_margin_to_limit: Decimal = Field(
+        description="Margem percentual atual até o limite mínimo de 75.00%",
+    )
+    is_critical: bool = Field(
+        description="Indica se a frequência consolidada está abaixo do limiar preventivo (< 78.00%)",
+    )
+    is_attendance_critical: bool = Field(
+        description="Alias compatível com vw_module_attendance_risk para frequência < 78.00%",
+    )
+    risk_level: RiskLevel = Field(
+        description="Nível de atenção preventiva de frequência (LOW, HIGH, CRITICAL)",
+    )
+    critical_modules_count: int = Field(
+        ge=0,
+        description="Quantidade de módulos práticos com frequência abaixo de 78%",
+    )
+    by_subject: list[SubjectConsolidatedAttendanceSchema] = Field(
+        default_factory=list,
+        description="Resumo de frequência agrupado por disciplina técnica e seus módulos",
+    )
+    by_module: list[ModuleAttendanceRiskItemSchema] = Field(
+        default_factory=list,
+        description="Indicadores de frequência e margem de 75% por módulo prático",
+    )
+
+    @field_validator(
+        "attendance_percentage",
+        "min_required_percentage",
+        "max_allowed_absent_hours",
+        "remaining_absent_hours_margin",
+        "planned_max_allowed_absent_hours",
+        "planned_remaining_absent_hours_margin",
+        "percentage_margin_to_limit",
+        mode="after",
+    )
+    @classmethod
+    def quantize_decimal_metrics(cls, value: Decimal) -> Decimal:
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class StudentModuleProgressItemSchema(BaseResponseSchema):
+    """Progresso percentual e indicadores do estudante em cada módulo prático (BE-034 / FE-035)."""
+
+    module_id: UUID = Field(description="Identificador UUID do módulo prático")
+    subject_id: UUID = Field(description="Identificador UUID da disciplina técnica")
+    subject_code: str = Field(description="Código identificador da disciplina")
+    subject_name: str = Field(description="Nome oficial da disciplina")
+    module_title: str = Field(description="Título do módulo prático")
+    order_index: int = Field(ge=1, description="Ordem didática do módulo na disciplina")
+    practical_hours: int = Field(
+        ge=0,
+        description="Carga horária prática prevista para o módulo",
+    )
+    module_weight: Decimal = Field(
+        description="Peso ponderado do módulo na disciplina",
+    )
+    passing_score: Decimal = Field(
+        description="Nota mínima de corte do módulo prático",
+    )
+    total_tasks_count: int = Field(
+        ge=0,
+        description="Total de atividades práticas atribuídas ao estudante no módulo",
+    )
+    completed_tasks_count: int = Field(
+        ge=0,
+        description="Total de atividades práticas concluídas/avaliadas no módulo",
+    )
+    pending_tasks_count: int = Field(
+        ge=0,
+        description="Total de atividades práticas pendentes dentro do prazo no módulo",
+    )
+    late_tasks_count: int = Field(
+        ge=0,
+        description="Total de atividades práticas em atraso no módulo",
+    )
+    submitted_tasks_count: int = Field(
+        ge=0,
+        description="Total de atividades práticas entregues aguardando avaliação no módulo",
+    )
+    evaluated_tasks_count: int = Field(
+        ge=0,
+        description="Total de atividades práticas já avaliadas pelo docente no módulo",
+    )
+    progress_percentage: Decimal = Field(
+        description="Progresso percentual de conclusão do estudante no módulo prático (0.00 a 100.00%)",
+    )
+    completion_percentage: Decimal = Field(
+        description="Taxa percentual de atividades práticas concluídas no módulo (0.00 a 100.00%)",
+    )
+    attendance_percentage: Decimal = Field(
+        description="Percentual de presença do estudante no módulo prático (0.00 a 100.00%)",
+    )
+    assessments_count: int = Field(
+        ge=0,
+        description="Quantidade de avaliações formativas com nota lançada no módulo",
+    )
+    assessments_average: Decimal | None = Field(
+        default=None,
+        description="Média ponderada das avaliações formativas do módulo",
+    )
+    practical_tasks_average: Decimal | None = Field(
+        default=None,
+        description="Média das atividades práticas avaliadas no módulo",
+    )
+    module_average: Decimal | None = Field(
+        default=None,
+        description="Média consolidada do módulo combinando avaliações e práticas",
+    )
+    is_below_passing_score: bool = Field(
+        description="Indica se a média do módulo está abaixo da nota de corte",
+    )
+    is_completed: bool = Field(
+        description="Indica se o módulo prático teve todas as atividades concluídas (100%)",
+    )
+    status: AcademicStandingStatus = Field(
+        description="Situação acadêmica no módulo (APPROVED, IN_RECOVERY, AT_RISK)",
+    )
+
+    @field_validator(
+        "module_weight",
+        "passing_score",
+        "progress_percentage",
+        "completion_percentage",
+        "attendance_percentage",
+        mode="after",
+    )
+    @classmethod
+    def quantize_required_decimals(cls, value: Decimal) -> Decimal:
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+    @field_validator(
+        "assessments_average",
+        "practical_tasks_average",
+        "module_average",
+        mode="after",
+    )
+    @classmethod
+    def quantize_optional_decimals(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class StudentMilestoneTimelineItemSchema(BaseResponseSchema):
+    """Marco acadêmico da linha do tempo de evolução do estudante (student_milestone_history - DB-039 / FE-039)."""
+
+    id: UUID = Field(description="Identificador UUID do marco em student_milestone_history")
+    student_id: UUID = Field(description="Identificador UUID do estudante")
+    enrollment_id: UUID = Field(description="Identificador UUID da matrícula")
+    module_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do módulo prático associado (quando aplicável)",
+    )
+    module_title: str | None = Field(
+        default=None,
+        description="Título do módulo prático associado (quando aplicável)",
+    )
+    subject_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da disciplina associada ao módulo (quando aplicável)",
+    )
+    subject_code: str | None = Field(
+        default=None,
+        description="Código da disciplina associada ao módulo (quando aplicável)",
+    )
+    subject_name: str | None = Field(
+        default=None,
+        description="Nome da disciplina associada ao módulo (quando aplicável)",
+    )
+    milestone_type: MilestoneType = Field(
+        description="Tipo do marco acadêmico (MODULE_COMPLETED, SKILL_LEVEL_UP, PERFECT_ATTENDANCE, RECOVERY_ACHIEVED)",
+    )
+    title: str = Field(description="Título descritivo e motivador do marco conquistado")
+    description: str | None = Field(
+        default=None,
+        description="Descrição detalhada do marco acadêmico",
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Metadados estruturados JSONB do marco conquistado",
+    )
+    achieved_at: datetime = Field(
+        description="Data e hora UTC em que o marco foi conquistado",
+    )
+
+
+class StudentPortalDashboardResponseSchema(BaseResponseSchema):
+    """Resposta privada consolidada do Portal do Aluno (GET /api/v1/dashboard/student/me - BE-034).
+
+    Cumpre os requisitos de privacidade e autonomia do estudante (seção 4.2):
+    extrai exclusivamente os dados de current_user.id e jamais inclui observações
+    pedagógicas restritas de professores.
+    """
+
+    student_id: UUID = Field(description="Identificador UUID do próprio estudante autenticado")
+    student: DashboardStudentProfileSchema = Field(
+        description="Dados cadastrais do estudante autenticado",
+    )
+    enrollment_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da matrícula ativa/selecionada do estudante",
+    )
+    class_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da turma ativa/selecionada do estudante",
+    )
+    enrollment_status: EnrollmentStatus | None = Field(
+        default=None,
+        description="Status da matrícula ativa/selecionada",
+    )
+    academic_class: EnrollmentClassSummarySchema | None = Field(
+        default=None,
+        description="Resumo da turma acadêmica do estudante",
+    )
+    course_code: str | None = Field(
+        default=None,
+        description="Código do curso técnico SENAI",
+    )
+    course_name: str | None = Field(
+        default=None,
+        description="Nome oficial do curso técnico SENAI",
+    )
+    generated_at: datetime = Field(
+        description="Data e hora UTC da consulta ao Portal do Aluno",
+    )
+    overall_average: Decimal | None = Field(
+        default=None,
+        description="Média geral ponderada do estudante na turma (0.00 a 10.00)",
+    )
+    overall_progress_percentage: Decimal = Field(
+        default=Decimal("0.00"),
+        description="Progresso percentual global do estudante nos módulos práticos (0.00 a 100.00%)",
+    )
+    attendance_percentage: Decimal = Field(
+        default=Decimal("100.00"),
+        description="Percentual consolidado de presença do estudante (0.00 a 100.00%)",
+    )
+    standing_status: AcademicStandingStatus = Field(
+        default=AcademicStandingStatus.APPROVED,
+        description="Situação acadêmica consolidada (APPROVED, IN_RECOVERY, AT_RISK)",
+    )
+    risk_level: RiskLevel = Field(
+        default=RiskLevel.LOW,
+        description="Nível de atenção acadêmica (LOW, MODERATE, HIGH, CRITICAL)",
+    )
+    overview: DashboardStudent360SummaryItemSchema | None = Field(
+        default=None,
+        description="Indicadores globais consolidados via vw_student_360_performance (DB-036)",
+    )
+    attendance_summary: StudentPortalAttendanceSummarySchema = Field(
+        description="Resumo de frequência global, por disciplina e por módulo prático",
+    )
+    subjects: list[StudentSubjectAverageSchema] = Field(
+        default_factory=list,
+        description="Médias ponderadas por disciplina técnica e seus módulos práticos (FE-037)",
+    )
+    attendance_by_module: list[ModuleAttendanceRiskItemSchema] = Field(
+        default_factory=list,
+        description="Frequência detalhada e margem de 75% por módulo prático (FE-037)",
+    )
+    modules_progress: list[StudentModuleProgressItemSchema] = Field(
+        default_factory=list,
+        description="Progresso percentual e situação em cada módulo prático (FE-035)",
+    )
+    competencies: list[StudentCompetencyRadarItemSchema] = Field(
+        default_factory=list,
+        description="Evolução de nível por competência técnica para o Gráfico Radar (FE-038)",
+    )
+    competencies_radar: list[StudentCompetencyRadarItemSchema] = Field(
+        default_factory=list,
+        description="Alias compatível com FE-038 para evolução de nível por competência técnica",
+    )
+    task_counts: StudentTaskCountsSummarySchema = Field(
+        description="Contadores de atividades práticas pendentes, atrasadas, entregues e avaliadas",
+    )
+    activity_counters: StudentTaskCountsSummarySchema = Field(
+        description="Alias semântico para contadores de atividades práticas do estudante",
+    )
+    upcoming_tasks: list[StudentPendingTaskItemSchema] = Field(
+        default_factory=list,
+        description="Atividades práticas pendentes ou em atraso para alerta amigável no portal (FE-035 / FE-036)",
+    )
+    practical_submissions: list[StudentPendingTaskItemSchema] = Field(
+        default_factory=list,
+        description="Lista completa de atividades práticas do estudante com feedback das rubricas",
+    )
+    timeline: list[StudentMilestoneTimelineItemSchema] = Field(
+        default_factory=list,
+        description="Linha do tempo cronológica de marcos e conquistas acadêmicas (student_milestone_history - FE-039)",
+    )
+    milestone_history: list[StudentMilestoneTimelineItemSchema] = Field(
+        default_factory=list,
+        description="Alias direto da tabela student_milestone_history (DB-039) para a linha do tempo",
+    )
+
+    @field_validator(
+        "overall_progress_percentage",
+        "attendance_percentage",
+        mode="after",
+    )
+    @classmethod
+    def quantize_required_percentages(cls, value: Decimal) -> Decimal:
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+    @field_validator("overall_average", mode="after")
+    @classmethod
+    def quantize_optional_overall_average(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
 __all__ = [
     "DashboardStudent360SummaryItemSchema",
     "DashboardStudentProfileSchema",
@@ -421,6 +796,12 @@ __all__ = [
     "Student360QueryParams",
     "StudentActiveAlertItemSchema",
     "StudentCompetencyRadarItemSchema",
+    "StudentMilestoneTimelineItemSchema",
+    "StudentModuleProgressItemSchema",
+    "StudentPortalAttendanceSummarySchema",
+    "StudentPortalDashboardParamsDep",
+    "StudentPortalDashboardQueryParams",
+    "StudentPortalDashboardResponseSchema",
     "TeacherClassDashboardParamsDep",
     "TeacherClassDashboardQueryParams",
     "TeacherClassDashboardResponseSchema",
