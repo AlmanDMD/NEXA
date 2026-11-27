@@ -1,7 +1,9 @@
-# 📋 Documento de Visão do Produto — NEXA
+# 📋 Documento de Visão do Produto e Justificativa de Negócio — Sistema NEXA
 
-> **Referência**: DOC-001 | **Epic**: EPIC-01 — Autenticação, Perfis (RBAC) & Segurança  
-> **Sprint**: S1 | **Prioridade**: P0  
+> **ID do Card**: `DOC-001` | **Epic**: `EPIC-01: Autenticação, Perfis (RBAC) & Segurança`  
+> **Sprint / Lote**: `S1` | **Prioridade**: `P0` | **Estimativa**: `3 SP` | **Tipo**: `Documentação`  
+> **Público-Alvo do Documento**: Banca Avaliadora Acadêmica, Orientadores, Coordenação Pedagógica SENAI e Squads de Engenharia (Banco de Dados, Back-end e Front-end)  
+> **Rastreabilidade**: ⬅️ Início da Trilha (`Card 001/020`) | ➡️ Próximo: `DOC-002` (Requisitos RF/RNF) | 🔓 Desbloqueia: `DOC-002`, `DOC-003`, `DOC-007`, `DOC-010`, `DOC-011`, `DOC-019`, `DOC-020`  
 > **Última Revisão**: Novembro/2026
 
 ---
@@ -18,6 +20,7 @@
 8. [Justificativa de Negócio e Impacto Institucional](#8-justificativa-de-negócio-e-impacto-institucional)
 9. [Restrições e Premissas](#9-restrições-e-premissas)
 10. [Glossário](#10-glossário)
+11. [Matriz de Rastreabilidade com a Trilha de Documentação e Engenharia](#11-matriz-de-rastreabilidade-com-a-trilha-de-documentação-e-engenharia)
 
 ---
 
@@ -170,25 +173,27 @@ Desenvolver e disponibilizar uma plataforma web de gestão acadêmica especializ
 | **OE-05** | Garantir conformidade com a LGPD e segurança dos dados pedagógicos sensíveis. | Resultado de auditorias de segurança (criptografia, controle de acesso, logs). | 100% de conformidade nos requisitos de segurança mapeados (AES-256, JWT HttpOnly, RBAC). |
 | **OE-06** | Prover à coordenação pedagógica uma visão consolidada para apoio a Conselhos de Classe. | % de Conselhos de Classe que utilizam dados exportados do NEXA como base de discussão. | ≥ 80% dos Conselhos com suporte do sistema nas unidades piloto. |
 | **OE-07** | Implementar módulo de autoavaliação reflexiva com rastreamento de discrepância pedagógica. | % de alunos com pelo menos 1 autoavaliação registrada por módulo. | ≥ 65% de completude de autoavaliação por módulo nas turmas piloto. |
+| **OE-08** | Avaliar o impacto da intervenção pedagógica precoce sobre os índices de retenção e recuperação formativa ao longo do módulo. | Variação percentual nas taxas de retenção por falta ou defasagem prática entre turmas piloto e série histórica da unidade. | Meta exploratória a ser avaliada pós-piloto (referência de estudo: 10% a 20% de ampliação em recuperações bem-sucedidas dentro do próprio módulo, sem promessa de redução garantida de reprovações). |
 
 > [!NOTE]
-> As metas acima são **alvos a serem avaliados** ao longo do projeto e após implantação piloto. Nenhuma redução de índice (como taxa de reprovação) é garantida a priori — os resultados dependerão da adesão institucional, do perfil das turmas e da qualidade da implementação.
+> **Diretriz Ética e Metodológica sobre Metas Acadêmicas**: As metas acima são **alvos quantificados a serem avaliados empiricamente** ao longo do projeto e após a implantação piloto. O Sistema NEXA **não promete redução garantida de reprovações ou de evasão**, pois é uma plataforma de apoio à decisão pedagógica e diagnóstica; os desfechos acadêmicos finais dependem da mediação docente, da adesão institucional, do perfil socioeconômico das turmas e das ações presenciais em oficina.
 
 ---
 
 ## 6. Alinhamento Pedagógico — Metodologia de Competências SENAI
 
-### 6.1 Aderência ao Modelo de Gestão por Competências
+### 6.1 Aderência ao Modelo de Gestão por Competências (MSEP — Metodologia SENAI de Educação Profissional)
 
-O SENAI estrutura seus cursos com base em **Unidades Curriculares (UC)**, cada uma composta por **Indicadores de Desempenho (IDs)** e **Critérios de Avaliação (CA)** definidos nos Perfis Profissionais de Conclusão (PPC). O NEXA mapeia diretamente essa estrutura:
+O SENAI estrutura seus cursos técnicos e de aprendizagem industrial com base na **Metodologia SENAI de Educação Profissional (MSEP)**, articulando **Perfis Profissionais de Conclusão (PPC)**, **Unidades Curriculares (UC) / Disciplinas Técnicas**, **Módulos de Aprendizagem Prática**, **Capacidades / Competências Técnicas, Procedimentais e de Segurança** (`TECHNICAL`, `PROCEDURAL`, `SAFETY` na escala de proficiência de `1` a `5`) e **Critérios de Avaliação por Rubricas de Oficina**. O modelo de domínio do NEXA mapeia diretamente essa arquitetura curricular:
 
 ```
-Curso Técnico
-  └── Módulo / Unidade Curricular (UC)
-        └── Competência Técnica
-              └── Indicador de Desempenho (ID)
-                    └── Critério de Avaliação (rubrica de oficina)
-                          └── Registro de Avaliação por Aluno
+Curso Técnico SENAI (courses)
+  └── Turma & Período Letivo (classes) + Disciplina / Unidade Curricular (subjects)
+        └── Módulo de Aprendizagem Prática (learning_modules: Metrologia, Tornearia, Ajustagem)
+              └── Matriz de Competências do Módulo (competencies + module_competencies: escala 1 a 5 e pesos)
+                    ├── Atividades Práticas e Rubricas de Bancada (practical_tasks + task_criteria)
+                    │     └── Avaliação Docente e Evidências Práticas (submission_evaluations + skill_evidences)
+                    └── Autoavaliação Discente & Diagnóstico Explicável (self_assessment_forms + explainable_diagnostics)
 ```
 
 ### 6.2 Avaliação Formativa Contínua
@@ -317,6 +322,20 @@ O NEXA não compete com sistemas de gestão escolar generalistas (como sistemas 
 | **JWT** | JSON Web Token — padrão de token de autenticação utilizado pelo NEXA para gerenciamento de sessões seguras. |
 | **Dashboard 360°** | Painel de visão consolidada do professor, integrando frequência, avaliações, alertas de risco e comunicações de uma turma em uma única interface. |
 | **NPS** | Net Promoter Score — métrica de satisfação e lealdade do usuário em escala de 0 a 10. |
+| **MSEP** | Metodologia SENAI de Educação Profissional — referencial pedagógico oficial do SENAI que orienta o desenho curricular por competências, capacidades técnicas, socioemocionais e situações de aprendizagem prática. |
+| **Diagnóstico Explicável** | Comparativo estruturado entre o nível autopercebido pelo estudante (`1` a `5`) e a média das evidências práticas verificadas pelo docente (`skill_evidences`), classificando convergências (`ALIGNED`) e divergências (`OVERCONFIDENCE_RISK`, `UNDERCONFIDENCE_SUPPORT`, `INSUFFICIENT_EVIDENCE`) com explicação textual, evidências utilizadas e nota explícita de limitações. |
+
+---
+
+## 11. Matriz de Rastreabilidade com a Trilha de Documentação e Engenharia
+
+| Artefato / Card Desbloqueado | Relação Direta com a Visão do Produto (`DOC-001`) |
+|---|---|
+| **`DOC-002`** — Especificação de Requisitos (RF e RNF) | Deriva os Requisitos Funcionais e Não-Funcionais diretamente dos problemas `P-01`..`P-06` e dos objetivos quantificados `OE-01`..`OE-08`. |
+| **`DOC-003`** — Personas, Matriz RBAC e Jornadas | Detalha os 4 perfis mapeados na Seção 4 (`ADMIN`, `COORDINATOR`, `TEACHER`, `STUDENT`) e suas permissões. |
+| **`DOC-007`** — Arquitetura em Camadas e C4 Model | Traduz a proposta de valor e as restrições de infraestrutura/segurança das Seções 3 e 9 em containers Docker, FastAPI, React e PostgreSQL 16. |
+| **`DOC-010` / `DOC-011`** — Manual Docker e `README.md` | Materializam os critérios de aceite técnico de implantação reproduzível (Seção 7.1). |
+| **`DOC-019` / `DOC-020`** — Pitch da Banca e Relatório Final | Consolida a justificativa de negócio, o alinhamento pedagógico MSEP/SENAI e as metas de avaliação pós-piloto para a Banca Avaliadora. |
 
 ---
 
