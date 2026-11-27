@@ -36,6 +36,7 @@ ClassResolutionSource = Literal[
     "assessment_id",
     "form_id",
     "body_class_id",
+    "body_form_id",
 ]
 
 
@@ -112,6 +113,21 @@ def check_class_is_active(
                     parsed_body = json.loads(raw_body)
                     if isinstance(parsed_body, dict):
                         resolved_class_id = _parse_uuid_safe(parsed_body.get("class_id"))
+                except (ValueError, TypeError):
+                    resolved_class_id = None
+        elif source == "body_form_id":
+            raw_body = await request.body()
+            if raw_body:
+                try:
+                    parsed_body = json.loads(raw_body)
+                    if isinstance(parsed_body, dict):
+                        body_form_id = _parse_uuid_safe(parsed_body.get("form_id"))
+                        if body_form_id is not None:
+                            resolved_class_id = db.scalar(
+                                select(SelfAssessmentForm.class_id).where(
+                                    SelfAssessmentForm.id == body_form_id
+                                )
+                            )
                 except (ValueError, TypeError):
                     resolved_class_id = None
 

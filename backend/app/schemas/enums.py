@@ -115,6 +115,15 @@ class MilestoneType(StrEnum):
     RECOVERY_ACHIEVED = "RECOVERY_ACHIEVED"
 
 
+class DiagnosticType(StrEnum):
+    """Classificação do cruzamento diagnóstico entre autoavaliação e evidência docente — 'diagnostic_type_enum' (DB-035)."""
+
+    ALIGNED = "ALIGNED"
+    OVERCONFIDENCE_RISK = "OVERCONFIDENCE_RISK"
+    UNDERCONFIDENCE_SUPPORT = "UNDERCONFIDENCE_SUPPORT"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+
+
 __all__ = [
     "AcademicStandingStatus",
     "AlertCategory",
@@ -123,6 +132,7 @@ __all__ = [
     "AttendanceStatus",
     "ClassStatus",
     "CompetencyCategory",
+    "DiagnosticType",
     "EnrollmentStatus",
     "MilestoneType",
     "RiskLevel",

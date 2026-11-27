@@ -1,11 +1,11 @@
-"""Router para Cadastro, Reabertura e Consulta de Questionários de Autoavaliação de Competências (EPIC-07 / BE-035)."""
+"""Router para Cadastro, Reabertura, Consulta e Submissão de Questionários de Autoavaliação de Competências (EPIC-07 / BE-035 / BE-036)."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
 from app.core.class_period_guard import check_class_is_active
-from app.core.security import require_role
+from app.core.security import CurrentUserDep, require_role
 from app.models.user import User
 from app.schemas.base import UUIDPathParam
 from app.schemas.enums import UserRole
@@ -15,6 +15,8 @@ from app.schemas.self_assessment import (
     SelfAssessmentFormCreateSchema,
     SelfAssessmentFormResponseSchema,
     SelfAssessmentFormUpdateWindowSchema,
+    StudentSelfAssessmentSubmitRequestSchema,
+    StudentSelfAssessmentSubmitResponseSchema,
 )
 from app.services.self_assessment_service import SelfAssessmentServiceDep
 
@@ -102,6 +104,25 @@ async def list_class_self_assessment_forms(
     return self_assessment_service.list_class_self_assessment_forms(
         class_id,
         params,
+        current_user=current_user,
+    )
+
+
+@router.post(
+    "/self-assessments/submit",
+    response_model=StudentSelfAssessmentSubmitResponseSchema,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submeter respostas de autoavaliação de habilidades práticas pelo estudante autenticado",
+)
+async def submit_student_self_assessment(
+    payload: StudentSelfAssessmentSubmitRequestSchema,
+    self_assessment_service: SelfAssessmentServiceDep,
+    current_user: CurrentUserDep,
+    _class_guard: Annotated[object, Depends(check_class_is_active("body_form_id"))] = None,
+) -> StudentSelfAssessmentSubmitResponseSchema:
+    """Grava as respostas do estudante logado em student_self_assessments, sugere pedido de ajuda quando perceived_level <= 2 e dispara o cruzamento diagnóstico."""
+    return self_assessment_service.submit_student_self_assessment(
+        payload,
         current_user=current_user,
     )
 
