@@ -23,6 +23,7 @@ from app.schemas.enums import (
     EnrollmentStatus,
     MilestoneType,
     RiskLevel,
+    UserRole,
 )
 from app.schemas.practical_task import (
     StudentPendingTaskItemSchema,
@@ -362,6 +363,44 @@ class StudentCompetencyRadarItemSchema(BaseResponseSchema):
         return value.quantize(_DECIMAL_QUANTIZER)
 
 
+class AlertInterventionAuditItemSchema(BaseResponseSchema):
+    """Registro auditável de intervenção pedagógica realizada sobre um alerta acadêmico (audit_logs - BE-039)."""
+
+    audit_id: UUID = Field(description="Identificador UUID do log em audit_logs")
+    action: str = Field(
+        description="Ação registrada na auditoria (ACADEMIC_ALERT_ACKNOWLEDGED ou ACADEMIC_ALERT_RESOLVED)",
+    )
+    previous_status: AlertStatus | None = Field(
+        default=None,
+        description="Status do alerta antes da intervenção",
+    )
+    new_status: AlertStatus = Field(
+        description="Novo status aplicado na intervenção (ACKNOWLEDGED ou RESOLVED)",
+    )
+    resolution_notes: str = Field(
+        description="Notas descrevendo a ação pedagógica realizada",
+    )
+    actor_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do docente ou coordenador autor da intervenção",
+    )
+    actor_name: str | None = Field(
+        default=None,
+        description="Nome completo do responsável pela intervenção",
+    )
+    actor_role: UserRole | None = Field(
+        default=None,
+        description="Papel institucional do responsável pela intervenção",
+    )
+    ip_address: str | None = Field(
+        default=None,
+        description="Endereço IP de origem da operação registrada na auditoria",
+    )
+    recorded_at: datetime = Field(
+        description="Timestamp UTC do registro da intervenção na trilha imutável",
+    )
+
+
 class StudentActiveAlertItemSchema(BaseResponseSchema):
     """Resumo de alerta acadêmico explicável ativo na Ficha 360° do Aluno."""
 
@@ -381,7 +420,28 @@ class StudentActiveAlertItemSchema(BaseResponseSchema):
         description="Fotografia JSON das métricas no momento da geração do alerta",
     )
     status: AlertStatus = Field(description="Status atual do alerta")
+    resolved_by: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do docente ou coordenador que assumiu/encerrou o alerta",
+    )
+    resolved_by_name: str | None = Field(
+        default=None,
+        description="Nome completo do responsável pela última intervenção no alerta",
+    )
+    resolution_notes: str | None = Field(
+        default=None,
+        description="Notas da última intervenção pedagógica registrada no alerta",
+    )
     created_at: datetime = Field(description="Data/hora de geração do alerta")
+
+
+class StudentAlertHistoryItemSchema(StudentActiveAlertItemSchema):
+    """Item completo do histórico de alertas e intervenções pedagógicas na Ficha 360° (BE-039)."""
+
+    interventions: list[AlertInterventionAuditItemSchema] = Field(
+        default_factory=list,
+        description="Histórico auditável de intervenções pedagógicas realizadas no alerta",
+    )
 
 
 class Student360OverviewResponseSchema(BaseResponseSchema):
@@ -431,6 +491,10 @@ class Student360OverviewResponseSchema(BaseResponseSchema):
     active_alerts: list[StudentActiveAlertItemSchema] = Field(
         default_factory=list,
         description="Alertas acadêmicos ativos e explicáveis do estudante",
+    )
+    alerts_history: list[StudentAlertHistoryItemSchema] = Field(
+        default_factory=list,
+        description="Histórico completo de alertas e intervenções pedagógicas do estudante (ACTIVE, ACKNOWLEDGED, RESOLVED)",
     )
 
 
@@ -788,6 +852,7 @@ class StudentPortalDashboardResponseSchema(BaseResponseSchema):
 
 
 __all__ = [
+    "AlertInterventionAuditItemSchema",
     "DashboardStudent360SummaryItemSchema",
     "DashboardStudentProfileSchema",
     "ModuleDashboardPerformanceSchema",
@@ -795,6 +860,7 @@ __all__ = [
     "Student360ParamsDep",
     "Student360QueryParams",
     "StudentActiveAlertItemSchema",
+    "StudentAlertHistoryItemSchema",
     "StudentCompetencyRadarItemSchema",
     "StudentMilestoneTimelineItemSchema",
     "StudentModuleProgressItemSchema",

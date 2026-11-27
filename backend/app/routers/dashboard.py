@@ -2,12 +2,13 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
 from app.core.security import require_role
 from app.models.user import User
 from app.schemas.base import UUIDPathParam
 from app.schemas.dashboard import (
+    AlertInterventionAuditItemSchema,
     Student360OverviewResponseSchema,
     Student360ParamsDep,
     StudentPortalDashboardParamsDep,
@@ -17,6 +18,8 @@ from app.schemas.dashboard import (
 )
 from app.schemas.enums import UserRole
 from app.schemas.risk_engine import (
+    AcademicAlertResolutionResponseSchema,
+    AcademicAlertResolveRequestSchema,
     AtRiskStudentsPaginatedResponseSchema,
     AtRiskStudentsParamsDep,
     ClassRiskEvaluationResponseSchema,
@@ -135,6 +138,59 @@ async def get_student_portal_dashboard_me(
     """Retorna informações privadas exclusivas do próprio estudante autenticado (current_user.id)."""
     return dashboard_service.get_student_portal_dashboard(
         params,
+        current_user=current_user,
+    )
+
+
+@router.patch(
+    "/alerts/{id}/resolve",
+    response_model=AcademicAlertResolutionResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Assumir acompanhamento (ACKNOWLEDGED) ou encerrar (RESOLVED) alerta acadêmico com auditoria",
+)
+@router.put(
+    "/alerts/{id}/resolve",
+    response_model=AcademicAlertResolutionResponseSchema,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def resolve_academic_alert(
+    id: UUIDPathParam,
+    payload: AcademicAlertResolveRequestSchema,
+    request: Request,
+    risk_engine_service: RiskEngineServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> AcademicAlertResolutionResponseSchema:
+    """Atualiza status de alerta acadêmico (ACKNOWLEDGED | RESOLVED), grava resolved_by e registra log em audit_logs (BE-039)."""
+    client_ip = request.client.host if request.client is not None else None
+    return risk_engine_service.resolve_academic_alert(
+        id,
+        payload,
+        current_user=current_user,
+        ip_address=client_ip,
+    )
+
+
+@router.get(
+    "/alerts/{id}/history",
+    response_model=list[AlertInterventionAuditItemSchema],
+    status_code=status.HTTP_200_OK,
+    summary="Consultar histórico de intervenções pedagógicas de um alerta acadêmico",
+)
+async def get_academic_alert_history(
+    id: UUIDPathParam,
+    risk_engine_service: RiskEngineServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+) -> list[AlertInterventionAuditItemSchema]:
+    """Retorna a linha do tempo auditável das intervenções registradas para o alerta (BE-039)."""
+    return risk_engine_service.get_alert_history(
+        id,
         current_user=current_user,
     )
 

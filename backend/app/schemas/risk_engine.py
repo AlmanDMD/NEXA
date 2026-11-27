@@ -6,14 +6,17 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Query
-from pydantic import Field, field_validator
+from pydantic import BeforeValidator, Field, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.schemas.base import BaseResponseSchema, StrictRequestSchema
-from app.schemas.dashboard import DashboardStudentProfileSchema
+from app.schemas.dashboard import (
+    AlertInterventionAuditItemSchema,
+    DashboardStudentProfileSchema,
+)
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import AlertCategory, AlertStatus, RiskLevel
-from app.schemas.validators import sanitize_optional_text
+from app.schemas.enums import AlertCategory, AlertStatus, RiskLevel, UserRole
+from app.schemas.validators import sanitize_optional_text, sanitize_text
 
 _DECIMAL_QUANTIZER: Decimal = Decimal("0.01")
 
@@ -21,6 +24,59 @@ ETHICAL_PEDAGOGICAL_DISCLAIMER: str = (
     "Indicador transparente de atenção e apoio pedagógico preventivo; "
     "nunca constitui reprovação ou rótulo automático ao estudante."
 )
+
+
+def validate_alert_resolution_status_pt(value: Any) -> AlertStatus:
+    """Valida que o status informado para resolução do alerta é 'ACKNOWLEDGED' ou 'RESOLVED'."""
+    if isinstance(value, AlertStatus):
+        resolved = value
+    elif isinstance(value, str):
+        normalized = value.strip().upper()
+        if normalized == "ACKNOWLEDGE":
+            resolved = AlertStatus.ACKNOWLEDGED
+        elif normalized == "RESOLVE":
+            resolved = AlertStatus.RESOLVED
+        else:
+            try:
+                resolved = AlertStatus(normalized)
+            except ValueError as exc:
+                raise PydanticCustomError(
+                    "invalid_alert_resolution_status",
+                    "O status de resolução do alerta deve ser 'ACKNOWLEDGED' ou 'RESOLVED'.",
+                ) from exc
+    else:
+        raise PydanticCustomError(
+            "invalid_alert_resolution_status",
+            "O status de resolução do alerta deve ser 'ACKNOWLEDGED' ou 'RESOLVED'.",
+        )
+
+    if resolved not in (AlertStatus.ACKNOWLEDGED, AlertStatus.RESOLVED):
+        raise PydanticCustomError(
+            "invalid_alert_resolution_status",
+            "O status de resolução do alerta deve ser 'ACKNOWLEDGED' ou 'RESOLVED'.",
+        )
+    return resolved
+
+
+def validate_alert_resolution_notes_pt(value: Any) -> str:
+    """Sanitiza e valida as notas obrigatórias de intervenção pedagógica (mínimo 10 caracteres)."""
+    if not isinstance(value, str):
+        raise PydanticCustomError(
+            "alert_resolution_notes_invalid",
+            "As notas de resolução (resolution_notes) devem ser um texto válido.",
+        )
+    cleaned = sanitize_text(value, collapse_spaces=False)
+    if len(cleaned) < 10:
+        raise PydanticCustomError(
+            "alert_resolution_notes_too_short",
+            "As notas de resolução (resolution_notes) são obrigatórias e devem ter pelo menos 10 caracteres.",
+        )
+    if len(cleaned) > 2000:
+        raise PydanticCustomError(
+            "alert_resolution_notes_too_long",
+            "As notas de resolução (resolution_notes) devem ter no máximo 2000 caracteres.",
+        )
+    return cleaned
 
 
 class RiskRuleEvaluationItemSchema(BaseResponseSchema):
@@ -76,6 +132,14 @@ class AcademicAlertResponseSchema(BaseResponseSchema):
     )
     status: AlertStatus = Field(
         description="Status do ciclo do alerta (ACTIVE, ACKNOWLEDGED, RESOLVED)",
+    )
+    resolved_by: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do docente ou coordenador responsável pela intervenção",
+    )
+    resolution_notes: str | None = Field(
+        default=None,
+        description="Descrição da intervenção pedagógica registrada",
     )
     ethical_disclaimer: str = Field(
         default=ETHICAL_PEDAGOGICAL_DISCLAIMER,
@@ -307,7 +371,15 @@ class AtRiskStudentAlertItemSchema(BaseResponseSchema):
         description="Categoria da regra que gerou o alerta (ATTENDANCE, GRADE_DROP, PENDING_TASKS, SELF_EVAL_GAP)",
     )
     status: AlertStatus = Field(
-        description="Status atual do alerta (ACTIVE)",
+        description="Status atual do alerta (ACTIVE, ACKNOWLEDGED, RESOLVED)",
+    )
+    resolved_by: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do docente ou coordenador responsável pela intervenção",
+    )
+    resolution_notes: str | None = Field(
+        default=None,
+        description="Descrição da intervenção pedagógica registrada",
     )
     explainable_reason: str = Field(
         description="Justificativa transparente detalhando a regra e as evidências numéricas",
@@ -378,8 +450,73 @@ class AtRiskStudentsPaginatedResponseSchema(BaseResponseSchema):
     )
 
 
+class AcademicAlertResolveRequestSchema(StrictRequestSchema):
+    """Payload de entrada para assumir acompanhamento (ACKNOWLEDGED) ou encerrar (RESOLVED) um alerta (BE-039)."""
+
+    status: Annotated[
+        AlertStatus,
+        BeforeValidator(validate_alert_resolution_status_pt),
+        Field(description="Novo status do alerta ('ACKNOWLEDGED' ou 'RESOLVED')"),
+    ]
+    resolution_notes: Annotated[
+        str,
+        BeforeValidator(validate_alert_resolution_notes_pt),
+        Field(
+            description="Descrição obrigatória da ação/intervenção pedagógica tomada (mínimo 10 caracteres)",
+            examples=[
+                "Realizada mentoria individual em bancada e plano de reposição de faltas com o estudante."
+            ],
+        ),
+    ]
+
+
+class AlertResolverSummarySchema(BaseResponseSchema):
+    """Resumo cadastral do docente ou coordenador responsável pela intervenção no alerta."""
+
+    id: UUID = Field(description="Identificador UUID do usuário responsável pela intervenção")
+    email: str = Field(description="E-mail institucional do responsável")
+    role: UserRole = Field(description="Papel institucional do responsável")
+    full_name: str | None = Field(
+        default=None,
+        description="Nome completo do responsável pela intervenção",
+    )
+
+
+class AcademicAlertResolutionResponseSchema(AcademicAlertResponseSchema):
+    """Resposta da atualização/resolução de alerta acadêmico com trilha de auditoria e histórico (BE-039)."""
+
+    alert_id: UUID = Field(description="Alias explícito do identificador UUID do alerta")
+    previous_status: AlertStatus = Field(
+        description="Status anterior do alerta antes da intervenção registrada",
+    )
+    resolved_by: UUID = Field(
+        description="Identificador UUID do professor/coordenador que assumiu ou encerrou o alerta",
+    )
+    resolution_notes: str = Field(
+        description="Descrição registrada da ação pedagógica tomada",
+    )
+    resolver: AlertResolverSummarySchema | None = Field(
+        default=None,
+        description="Dados cadastrais do responsável pela intervenção",
+    )
+    audit_log_id: UUID = Field(
+        description="Identificador UUID do registro gerado em audit_logs",
+    )
+    updated_at: datetime = Field(
+        description="Data/hora UTC da atualização do alerta e gravação na auditoria",
+    )
+    intervention_history: list[AlertInterventionAuditItemSchema] = Field(
+        default_factory=list,
+        description="Histórico cronológico completo de intervenções registradas em audit_logs para este alerta",
+    )
+
+
 __all__ = [
+    "AcademicAlertResolutionResponseSchema",
+    "AcademicAlertResolveRequestSchema",
     "AcademicAlertResponseSchema",
+    "AlertInterventionAuditItemSchema",
+    "AlertResolverSummarySchema",
     "AtRiskAlertModuleSummarySchema",
     "AtRiskStudentAlertItemSchema",
     "AtRiskStudentCurrentMetricsSchema",
@@ -390,4 +527,6 @@ __all__ = [
     "ETHICAL_PEDAGOGICAL_DISCLAIMER",
     "RiskRuleEvaluationItemSchema",
     "StudentRiskEvaluationResultSchema",
+    "validate_alert_resolution_notes_pt",
+    "validate_alert_resolution_status_pt",
 ]
