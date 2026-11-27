@@ -26,6 +26,10 @@ from app.schemas.enums import (
     UserRole,
 )
 from app.schemas.self_assessment import (
+    DiagnosticDiscrepanciesFiltersAppliedSchema,
+    DiagnosticDiscrepanciesListResponseSchema,
+    DiagnosticDiscrepanciesQueryParams,
+    DiagnosticDiscrepanciesSummarySchema,
     DiagnosticEngineEvaluationResponseSchema,
     DiagnosticEvidenceSummarySchema,
     ExplainableDiagnosticItemResponseSchema,
@@ -37,6 +41,15 @@ DIAGNOSTIC_MODULE_NOT_FOUND_MESSAGE: Final[str] = (
 )
 DIAGNOSTIC_TEACHER_FORBIDDEN_MESSAGE: Final[str] = (
     "Acesso não autorizado: professor não possui atribuição ativa nesta turma."
+)
+DIAGNOSTIC_STUDENT_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso restrito: estudantes só possuem permissão para visualizar seu próprio comparativo de aprendizagem."
+)
+DIAGNOSTIC_STUDENT_NOT_ENROLLED_MESSAGE: Final[str] = (
+    "Acesso não autorizado: estudante não possui matrícula ativa nesta turma."
+)
+DIAGNOSTIC_TEACHER_STUDENT_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: estudante não pertence às turmas ativas do professor."
 )
 
 # Limiares oficiais do Algoritmo de Cruzamento Diagnóstico (BE-037 / DB-038 / Seção 4.3)
@@ -637,6 +650,333 @@ class DiagnosticService:
             diagnostics=diagnostics,
         )
 
+    def get_discrepancies(
+        self,
+        params: DiagnosticDiscrepanciesQueryParams,
+        *,
+        current_user: User,
+    ) -> DiagnosticDiscrepanciesListResponseSchema:
+        """Consulta comparativa de discrepâncias de aprendizagem entre autoavaliação e evidências práticas (GET /api/v1/diagnostics/discrepancies - BE-038).
+
+        Critérios de Aceitação e Regras de Negócio:
+        - Estudante visualiza apenas o próprio comparativo com linguagem pedagógica construtiva.
+        - Professor visualiza o mapa de divergências das suas turmas com filtros.
+        - Coordenação e Admin possuem visão geral irrestrita.
+        """
+        target_class_id: UUID | None = None
+        target_class_ids: list[UUID] | None = None
+        effective_student_id: UUID | None = None
+
+        if current_user.role == UserRole.STUDENT:
+            if params.student_id is not None and params.student_id != current_user.id:
+                raise ForbiddenException(message=DIAGNOSTIC_STUDENT_FORBIDDEN_MESSAGE)
+            effective_student_id = current_user.id
+
+            if params.class_id is not None:
+                if not self._repository.is_student_enrolled_in_class(
+                    student_id=current_user.id,
+                    class_id=params.class_id,
+                ):
+                    raise ForbiddenException(
+                        message=DIAGNOSTIC_STUDENT_NOT_ENROLLED_MESSAGE
+                    )
+                target_class_id = params.class_id
+
+        elif current_user.role == UserRole.TEACHER:
+            if params.class_id is not None:
+                if not self._repository.is_teacher_assigned_to_class(
+                    teacher_id=current_user.id,
+                    class_id=params.class_id,
+                ):
+                    raise ForbiddenException(
+                        message=DIAGNOSTIC_TEACHER_FORBIDDEN_MESSAGE
+                    )
+                target_class_id = params.class_id
+            else:
+                teacher_classes = self._repository.get_teacher_assigned_class_ids(
+                    current_user.id
+                )
+                if not teacher_classes:
+                    return DiagnosticDiscrepanciesListResponseSchema(
+                        total=0,
+                        page=params.page,
+                        page_size=params.page_size,
+                        total_pages=0,
+                        summary=DiagnosticDiscrepanciesSummarySchema(
+                            total_discrepancies=0,
+                            aligned_count=0,
+                            overconfidence_risk_count=0,
+                            underconfidence_support_count=0,
+                            insufficient_evidence_count=0,
+                            critical_alerts_count=0,
+                        ),
+                        filters=DiagnosticDiscrepanciesFiltersAppliedSchema(
+                            class_id=None,
+                            module_id=params.module_id,
+                            student_id=params.student_id,
+                            competency_id=params.competency_id,
+                            diagnostic_type=params.diagnostic_type,
+                        ),
+                        discrepancies=[],
+                        ethical_disclaimer=SELF_ASSESSMENT_NON_DEFINITIVE_DISCLAIMER,
+                    )
+                target_class_ids = teacher_classes
+
+            if params.student_id is not None:
+                if target_class_id is not None:
+                    if not self._repository.is_student_enrolled_in_class(
+                        student_id=params.student_id,
+                        class_id=target_class_id,
+                    ):
+                        raise ForbiddenException(
+                            message=DIAGNOSTIC_TEACHER_STUDENT_FORBIDDEN_MESSAGE
+                        )
+                else:
+                    if not self._repository.is_student_in_teacher_classes(
+                        teacher_id=current_user.id,
+                        student_id=params.student_id,
+                    ):
+                        raise ForbiddenException(
+                            message=DIAGNOSTIC_TEACHER_STUDENT_FORBIDDEN_MESSAGE
+                        )
+                effective_student_id = params.student_id
+        else:
+            target_class_id = params.class_id
+            effective_student_id = params.student_id
+
+        if params.module_id is not None:
+            if self._repository.get_module_by_id(params.module_id) is None:
+                raise NotFoundException(message=DIAGNOSTIC_MODULE_NOT_FOUND_MESSAGE)
+
+        # 1. Consulta inicial na tabela explainable_diagnostics
+        all_matching, total_count = self._repository.query_explainable_diagnostics(
+            class_id=target_class_id,
+            class_ids=target_class_ids,
+            module_id=params.module_id,
+            student_id=effective_student_id,
+            competency_id=params.competency_id,
+            diagnostic_type=params.diagnostic_type,
+            limit=10000,
+            offset=0,
+        )
+
+        # 2. Se nenhum diagnóstico foi encontrado, verifica se há dados na view vw_self_eval_discrepancy para auto-sincronização
+        if total_count == 0:
+            discrepancy_rows = self._repository.query_discrepancy_view(
+                class_id=target_class_id,
+                module_id=params.module_id,
+                student_id=effective_student_id,
+                competency_ids=[params.competency_id] if params.competency_id else None,
+            )
+            if discrepancy_rows:
+                if target_class_id is not None:
+                    self.run_diagnostic_crossover(
+                        class_id=target_class_id,
+                        module_id=params.module_id,
+                        student_id=effective_student_id,
+                    )
+                else:
+                    distinct_cids = list(
+                        dict.fromkeys(
+                            r["class_id"]
+                            for r in discrepancy_rows
+                            if r.get("class_id") is not None
+                        )
+                    )
+                    for cid in distinct_cids:
+                        if target_class_ids is None or cid in target_class_ids:
+                            self.run_diagnostic_crossover(
+                                class_id=cid,
+                                module_id=params.module_id,
+                                student_id=effective_student_id,
+                            )
+
+                all_matching, total_count = (
+                    self._repository.query_explainable_diagnostics(
+                        class_id=target_class_id,
+                        class_ids=target_class_ids,
+                        module_id=params.module_id,
+                        student_id=effective_student_id,
+                        competency_id=params.competency_id,
+                        diagnostic_type=params.diagnostic_type,
+                        limit=10000,
+                        offset=0,
+                    )
+                )
+
+        # 3. Busca evidências práticas e alertas pedagógicos para enriquecer os diagnósticos
+        stu_ids = list(dict.fromkeys(d.student_id for d in all_matching))
+        comp_ids = list(
+            dict.fromkeys(
+                d.competency_id for d in all_matching if d.competency_id is not None
+            )
+        )
+        mod_ids = list(dict.fromkeys(d.module_id for d in all_matching))
+
+        evidences_map = (
+            self._repository.list_skill_evidences_for_students_and_competencies(
+                student_ids=stu_ids,
+                competency_ids=comp_ids,
+            )
+        )
+        alerts_map = (
+            self._repository.map_active_self_eval_gap_alerts_for_students_and_modules(
+                student_ids=stu_ids,
+                module_ids=mod_ids,
+            )
+        )
+
+        aligned_count = sum(
+            1 for d in all_matching if d.diagnostic_type == DiagnosticType.ALIGNED
+        )
+        overconf_count = sum(
+            1
+            for d in all_matching
+            if d.diagnostic_type == DiagnosticType.OVERCONFIDENCE_RISK
+        )
+        underconf_count = sum(
+            1
+            for d in all_matching
+            if d.diagnostic_type == DiagnosticType.UNDERCONFIDENCE_SUPPORT
+        )
+        insufficient_count = sum(
+            1
+            for d in all_matching
+            if d.diagnostic_type == DiagnosticType.INSUFFICIENT_EVIDENCE
+        )
+        critical_alerts_count = sum(
+            1
+            for d in all_matching
+            if (d.student_id, d.module_id, d.competency_id) in alerts_map
+        )
+
+        # 4. Paginação dos resultados
+        offset = (params.page - 1) * params.page_size
+        paginated_raw = all_matching[offset : offset + params.page_size]
+
+        formatted_items: list[ExplainableDiagnosticItemResponseSchema] = []
+        for diag in paginated_raw:
+            raw_evidences = (
+                evidences_map.get((diag.student_id, diag.competency_id), [])
+                if diag.competency_id is not None
+                else []
+            )
+            evidence_summaries = [
+                DiagnosticEvidenceSummarySchema(
+                    evidence_id=ev.id,
+                    competency_id=ev.competency_id,
+                    source_submission_id=ev.source_submission_id,
+                    task_id=ev.source_submission.task_id
+                    if ev.source_submission is not None
+                    else None,
+                    task_title=ev.source_submission.task.title
+                    if (
+                        ev.source_submission is not None
+                        and ev.source_submission.task is not None
+                    )
+                    else None,
+                    verified_level=_q2(ev.verified_level),
+                    verified_by=ev.verified_by,
+                    recorded_at=_ensure_utc(ev.recorded_at),
+                )
+                for ev in raw_evidences
+            ]
+
+            active_alert = (
+                alerts_map.get((diag.student_id, diag.module_id, diag.competency_id))
+                if diag.competency_id is not None
+                else None
+            )
+
+            student_name: str | None = None
+            if diag.student is not None:
+                student_name = (
+                    diag.student.profile.full_name
+                    if diag.student.profile is not None
+                    else diag.student.email
+                )
+
+            module_title: str | None = (
+                diag.module.title if diag.module is not None else None
+            )
+            competency_code: str | None = (
+                diag.competency.code if diag.competency is not None else None
+            )
+            competency_title: str | None = (
+                diag.competency.title if diag.competency is not None else None
+            )
+            competency_category = (
+                diag.competency.category if diag.competency is not None else None
+            )
+
+            formatted_items.append(
+                ExplainableDiagnosticItemResponseSchema(
+                    id=diag.id,
+                    student_id=diag.student_id,
+                    student_name=student_name,
+                    class_id=diag.class_id,
+                    module_id=diag.module_id,
+                    module_title=module_title,
+                    competency_id=diag.competency_id,
+                    competency_code=competency_code,
+                    competency_title=competency_title,
+                    competency_category=competency_category,
+                    self_perceived_level=_q2(diag.self_perceived_level),
+                    teacher_verified_level=_q2(diag.teacher_verified_level),
+                    discrepancy_gap=_q2(diag.discrepancy_gap),
+                    confidence_score=None,
+                    evidence_count=len(evidence_summaries),
+                    evidences_used=evidence_summaries,
+                    diagnostic_type=diag.diagnostic_type,
+                    explanation_text=diag.explanation_text,
+                    limitations_note=diag.limitations_note,
+                    recommended_action=diag.recommended_action,
+                    pedagogical_alert_triggered=active_alert is not None,
+                    pedagogical_alert_id=active_alert.id
+                    if active_alert is not None
+                    else None,
+                    generated_at=_ensure_utc(diag.generated_at),
+                )
+            )
+
+        total_pages = (
+            (total_count + params.page_size - 1) // params.page_size
+            if total_count > 0
+            else 0
+        )
+
+        logger.bind(
+            actor_id=str(current_user.id),
+            actor_role=current_user.role.value,
+            total_discrepancies=total_count,
+            page=params.page,
+            page_size=params.page_size,
+        ).info("Discrepâncias de aprendizagem consultadas com sucesso (BE-038).")
+
+        return DiagnosticDiscrepanciesListResponseSchema(
+            total=total_count,
+            page=params.page,
+            page_size=params.page_size,
+            total_pages=total_pages,
+            summary=DiagnosticDiscrepanciesSummarySchema(
+                total_discrepancies=total_count,
+                aligned_count=aligned_count,
+                overconfidence_risk_count=overconf_count,
+                underconfidence_support_count=underconf_count,
+                insufficient_evidence_count=insufficient_count,
+                critical_alerts_count=critical_alerts_count,
+            ),
+            filters=DiagnosticDiscrepanciesFiltersAppliedSchema(
+                class_id=target_class_id,
+                module_id=params.module_id,
+                student_id=effective_student_id,
+                competency_id=params.competency_id,
+                diagnostic_type=params.diagnostic_type,
+            ),
+            discrepancies=formatted_items,
+            ethical_disclaimer=SELF_ASSESSMENT_NON_DEFINITIVE_DISCLAIMER,
+        )
+
 
 def get_diagnostic_service(
     repository: DiagnosticRepositoryDep,
@@ -656,7 +996,10 @@ __all__ = [
     "CompetencyDiagnosticInput",
     "DIAGNOSTIC_CLASS_NOT_FOUND_MESSAGE",
     "DIAGNOSTIC_MODULE_NOT_FOUND_MESSAGE",
+    "DIAGNOSTIC_STUDENT_FORBIDDEN_MESSAGE",
+    "DIAGNOSTIC_STUDENT_NOT_ENROLLED_MESSAGE",
     "DIAGNOSTIC_TEACHER_FORBIDDEN_MESSAGE",
+    "DIAGNOSTIC_TEACHER_STUDENT_FORBIDDEN_MESSAGE",
     "DISCREPANCY_CRITICAL_THRESHOLD",
     "DiagnosticService",
     "DiagnosticServiceDep",
