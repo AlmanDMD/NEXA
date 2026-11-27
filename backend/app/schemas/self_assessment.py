@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Annotated, Any, Self
 from uuid import UUID
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import AliasChoices, BeforeValidator, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
@@ -881,12 +881,123 @@ class StudentSelfAssessmentSubmitResponseSchema(BaseResponseSchema):
     submitted_at: datetime = Field(description="Timestamp UTC da submissão")
 
 
+class DiagnosticDiscrepanciesQueryParams(StrictRequestSchema):
+    """Parâmetros de consulta e filtros para a listagem de discrepâncias de aprendizagem (BE-038)."""
+
+    class_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da turma acadêmica",
+    )
+    module_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID do módulo de aprendizagem prática",
+    )
+    student_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID do estudante (estudantes só podem consultar o próprio)",
+    )
+    competency_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da competência técnica",
+    )
+    diagnostic_type: DiagnosticType | None = Field(
+        default=None,
+        description="Filtro opcional pelo tipo de divergência diagnóstica",
+    )
+    page: int = Field(
+        default=1,
+        ge=1,
+        description="Número da página para paginação de resultados",
+    )
+    page_size: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+        description="Quantidade de diagnósticos retornados por página (1 a 200)",
+    )
+
+
+DiagnosticDiscrepanciesParamsDep = Annotated[
+    DiagnosticDiscrepanciesQueryParams,
+    Depends(),
+]
+
+
+class DiagnosticDiscrepanciesFiltersAppliedSchema(BaseResponseSchema):
+    """Metadados dos filtros efetivamente aplicados na consulta de discrepâncias."""
+
+    class_id: UUID | None = Field(default=None, description="Filtro de turma aplicado")
+    module_id: UUID | None = Field(default=None, description="Filtro de módulo aplicado")
+    student_id: UUID | None = Field(default=None, description="Filtro de estudante aplicado")
+    competency_id: UUID | None = Field(default=None, description="Filtro de competência aplicado")
+    diagnostic_type: DiagnosticType | None = Field(
+        default=None,
+        description="Filtro de tipo diagnóstico aplicado",
+    )
+
+
+class DiagnosticDiscrepanciesSummarySchema(BaseResponseSchema):
+    """Resumo analítico quantitativo das discrepâncias consultadas para apoio pedagógico (BE-038)."""
+
+    total_discrepancies: int = Field(
+        ge=0,
+        description="Total geral de diagnósticos explicáveis no conjunto filtrado",
+    )
+    aligned_count: int = Field(
+        ge=0,
+        description="Total de competências com autoavaliação e prática alinhadas (ALIGNED)",
+    )
+    overconfidence_risk_count: int = Field(
+        ge=0,
+        description="Total de competências com percepção acima das evidências de oficina (OVERCONFIDENCE_RISK)",
+    )
+    underconfidence_support_count: int = Field(
+        ge=0,
+        description="Total de competências em que o estudante domina a prática mas está inseguro (UNDERCONFIDENCE_SUPPORT)",
+    )
+    insufficient_evidence_count: int = Field(
+        ge=0,
+        description="Total de competências ainda sem entregas práticas avaliadas (INSUFFICIENT_EVIDENCE)",
+    )
+    critical_alerts_count: int = Field(
+        ge=0,
+        description="Total de diagnósticos com alertas pedagógicos críticos ativos (SELF_EVAL_GAP)",
+    )
+
+
+class DiagnosticDiscrepanciesListResponseSchema(BaseResponseSchema):
+    """Resposta consolidada do endpoint de consulta de discrepâncias de aprendizagem (GET /api/v1/diagnostics/discrepancies - BE-038)."""
+
+    total: int = Field(ge=0, description="Total de registros que atendem aos filtros")
+    page: int = Field(ge=1, description="Página atual da listagem")
+    page_size: int = Field(ge=1, description="Tamanho de página utilizado")
+    total_pages: int = Field(ge=0, description="Total de páginas calculadas")
+    summary: DiagnosticDiscrepanciesSummarySchema = Field(
+        description="Sumário quantitativo consolidado dos tipos diagnósticos",
+    )
+    filters: DiagnosticDiscrepanciesFiltersAppliedSchema = Field(
+        description="Filtros aplicados na consulta",
+    )
+    discrepancies: list[ExplainableDiagnosticItemResponseSchema] = Field(
+        default_factory=list,
+        description="Lista detalhada dos diagnósticos explicáveis comparando autoavaliação e evidências práticas",
+    )
+    ethical_disclaimer: str = Field(
+        description="Nota ética garantindo que a autoavaliação nunca é tratada como prova definitiva de competência",
+    )
+
+
 __all__ = [
     "ClassSelfAssessmentFormsListResponseSchema",
     "ClassSelfAssessmentFormsParamsDep",
     "ClassSelfAssessmentFormsQueryParams",
     "ConfidenceScoreInt",
     "DEFAULT_SELF_ASSESSMENT_SCALE",
+    "DiagnosticDiscrepanciesFiltersAppliedSchema",
+    "DiagnosticDiscrepanciesListResponseSchema",
+    "DiagnosticDiscrepanciesParamsDep",
+    "DiagnosticDiscrepanciesQueryParams",
+    "DiagnosticDiscrepanciesSummarySchema",
     "DiagnosticEngineEvaluationResponseSchema",
     "DiagnosticEvidenceSummarySchema",
     "ExplainableDiagnosticItemResponseSchema",

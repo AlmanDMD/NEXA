@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import Depends
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import inspect, select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import DbSessionDep
@@ -25,6 +25,7 @@ from app.models.self_assessment import (
     vw_self_eval_discrepancy_table,
 )
 from app.models.teacher_assignment import TeacherAssignment
+from app.models.user import User
 from app.schemas.enums import (
     AlertCategory,
     AlertStatus,
@@ -325,6 +326,143 @@ class DiagnosticRepository:
         if matching_alerts:
             self._session.flush()
         return None
+
+    def get_teacher_assigned_class_ids(self, teacher_id: UUID) -> list[UUID]:
+        """Retorna lista distinta de UUIDs das turmas nas quais o docente possui atribuição."""
+        stmt = (
+            select(TeacherAssignment.class_id)
+            .where(TeacherAssignment.teacher_id == teacher_id)
+            .distinct()
+        )
+        return list(self._session.scalars(stmt).all())
+
+    def is_student_enrolled_in_class(
+        self,
+        *,
+        student_id: UUID,
+        class_id: UUID,
+    ) -> bool:
+        """Verifica se o estudante possui matrícula ativa na turma especificada."""
+        stmt = (
+            select(Enrollment.id)
+            .where(
+                Enrollment.student_id == student_id,
+                Enrollment.class_id == class_id,
+                Enrollment.status == EnrollmentStatus.ACTIVE,
+            )
+            .limit(1)
+        )
+        return self._session.scalar(stmt) is not None
+
+    def is_student_in_teacher_classes(
+        self,
+        *,
+        teacher_id: UUID,
+        student_id: UUID,
+    ) -> bool:
+        """Verifica se o estudante está matriculado ativamente em ao menos uma das turmas do professor."""
+        teacher_classes = self.get_teacher_assigned_class_ids(teacher_id)
+        if not teacher_classes:
+            return False
+        stmt = (
+            select(Enrollment.id)
+            .where(
+                Enrollment.student_id == student_id,
+                Enrollment.class_id.in_(teacher_classes),
+                Enrollment.status == EnrollmentStatus.ACTIVE,
+            )
+            .limit(1)
+        )
+        return self._session.scalar(stmt) is not None
+
+    def query_explainable_diagnostics(
+        self,
+        *,
+        class_id: UUID | None = None,
+        class_ids: Sequence[UUID] | None = None,
+        module_id: UUID | None = None,
+        student_id: UUID | None = None,
+        competency_id: UUID | None = None,
+        diagnostic_type: DiagnosticType | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ExplainableDiagnostic], int]:
+        """Consulta diagnósticos explicáveis persistidos com filtros contextuais e paginação (BE-038)."""
+        base_stmt = select(ExplainableDiagnostic)
+
+        if class_id is not None:
+            base_stmt = base_stmt.where(ExplainableDiagnostic.class_id == class_id)
+        elif class_ids is not None:
+            unique_class_ids = list(dict.fromkeys(class_ids))
+            if not unique_class_ids:
+                return [], 0
+            base_stmt = base_stmt.where(
+                ExplainableDiagnostic.class_id.in_(unique_class_ids)
+            )
+
+        if module_id is not None:
+            base_stmt = base_stmt.where(ExplainableDiagnostic.module_id == module_id)
+        if student_id is not None:
+            base_stmt = base_stmt.where(ExplainableDiagnostic.student_id == student_id)
+        if competency_id is not None:
+            base_stmt = base_stmt.where(
+                ExplainableDiagnostic.competency_id == competency_id
+            )
+        if diagnostic_type is not None:
+            base_stmt = base_stmt.where(
+                ExplainableDiagnostic.diagnostic_type == diagnostic_type
+            )
+
+        count_stmt = select(func.count()).select_from(base_stmt.subquery())
+        total_count = self._session.scalar(count_stmt) or 0
+
+        items_stmt = (
+            base_stmt.options(
+                joinedload(ExplainableDiagnostic.student).joinedload(User.profile),
+                joinedload(ExplainableDiagnostic.academic_class),
+                joinedload(ExplainableDiagnostic.module),
+                joinedload(ExplainableDiagnostic.competency),
+            )
+            .order_by(
+                ExplainableDiagnostic.generated_at.desc(),
+                ExplainableDiagnostic.id.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        items = list(self._session.scalars(items_stmt).all())
+        return items, int(total_count)
+
+    def map_active_self_eval_gap_alerts_for_students_and_modules(
+        self,
+        *,
+        student_ids: Sequence[UUID],
+        module_ids: Sequence[UUID],
+    ) -> dict[tuple[UUID, UUID, UUID], AcademicAlert]:
+        """Retorna mapa {(student_id, module_id, competency_id): AcademicAlert} de alertas pedagógicos ativos (SELF_EVAL_GAP)."""
+        unique_students = list(dict.fromkeys(student_ids))
+        unique_modules = list(dict.fromkeys(module_ids))
+        if not unique_students or not unique_modules:
+            return {}
+
+        stmt = select(AcademicAlert).where(
+            AcademicAlert.student_id.in_(unique_students),
+            AcademicAlert.module_id.in_(unique_modules),
+            AcademicAlert.alert_category == AlertCategory.SELF_EVAL_GAP,
+            AcademicAlert.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+        )
+        alerts = list(self._session.scalars(stmt).all())
+        mapping: dict[tuple[UUID, UUID, UUID], AcademicAlert] = {}
+        for alert in alerts:
+            if isinstance(alert.metric_snapshot, dict):
+                comp_id_raw = alert.metric_snapshot.get("competency_id")
+                if comp_id_raw:
+                    try:
+                        c_id = UUID(str(comp_id_raw))
+                        mapping[(alert.student_id, alert.module_id, c_id)] = alert
+                    except ValueError:
+                        pass
+        return mapping
 
     def commit(self) -> None:
         """Efetiva a transação no banco de dados."""

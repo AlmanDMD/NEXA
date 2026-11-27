@@ -1,4 +1,4 @@
-"""Router para Cadastro, Reabertura, Consulta, Submissão de Autoavaliação e Motor de Cruzamento Diagnóstico (EPIC-07 / BE-035 / BE-036 / BE-037)."""
+"""Router para Cadastro, Reabertura, Consulta, Submissão de Autoavaliação, Motor de Cruzamento e Discrepâncias Diagnósticas (EPIC-07 / BE-035 / BE-036 / BE-037 / BE-038)."""
 
 from typing import Annotated
 from uuid import UUID
@@ -13,6 +13,8 @@ from app.schemas.enums import UserRole
 from app.schemas.self_assessment import (
     ClassSelfAssessmentFormsListResponseSchema,
     ClassSelfAssessmentFormsParamsDep,
+    DiagnosticDiscrepanciesListResponseSchema,
+    DiagnosticDiscrepanciesParamsDep,
     DiagnosticEngineEvaluationResponseSchema,
     SelfAssessmentFormCreateSchema,
     SelfAssessmentFormResponseSchema,
@@ -163,6 +165,39 @@ async def evaluate_class_explainable_diagnostics(
         class_id,
         module_id=module_id,
         student_id=student_id,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/diagnostics/discrepancies",
+    response_model=DiagnosticDiscrepanciesListResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar mapa comparativo de discrepâncias entre autoavaliação e avaliações práticas (BE-038)",
+)
+async def get_diagnostic_discrepancies(
+    params: DiagnosticDiscrepanciesParamsDep,
+    diagnostic_service: DiagnosticServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(
+            require_role(
+                UserRole.ADMIN,
+                UserRole.COORDINATOR,
+                UserRole.TEACHER,
+                UserRole.STUDENT,
+            )
+        ),
+    ],
+) -> DiagnosticDiscrepanciesListResponseSchema:
+    """Disponibiliza visualização comparativa entre autoavaliação e evidências práticas de aprendizagem (BE-038).
+
+    - Estudante: visualiza apenas o próprio comparativo com linguagem pedagógica construtiva.
+    - Professor: visualiza o mapa de divergências de toda a turma com filtros por módulo, competência e tipo diagnóstico.
+    - Coordenação / Admin: visão multidisciplinar irrestrita para apoio pedagógico.
+    """
+    return diagnostic_service.get_discrepancies(
+        params,
         current_user=current_user,
     )
 
