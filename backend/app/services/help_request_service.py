@@ -1,4 +1,4 @@
-"""Serviço de domínio para Abertura e Consulta de Solicitações de Apoio Confidenciais pelo Aluno (BE-043)."""
+"""Serviço de domínio para Abertura, Atendimento, Mensagens e Encerramento de Solicitações de Apoio Confidenciais (BE-043 / BE-044)."""
 
 from datetime import datetime, timezone
 import math
@@ -13,6 +13,7 @@ from app.core.exceptions import (
     UnprocessableEntityException,
 )
 from app.core.logging import logger
+from app.models.base import _utc_now
 from app.models.help_request import ChatMessage, HelpRequest
 from app.models.user import User
 from app.repositories.help_request_repository import (
@@ -20,17 +21,19 @@ from app.repositories.help_request_repository import (
     HelpRequestRepositoryDep,
 )
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import UserRole
+from app.schemas.enums import HelpRequestStatus, UserRole
 from app.schemas.help_request import (
     HelpRequestChatMessageResponseSchema,
     HelpRequestCreateSchema,
     HelpRequestListQueryParams,
+    HelpRequestMessageCreateSchema,
     HelpRequestModuleSummarySchema,
     HelpRequestPaginatedResponseSchema,
     HelpRequestResponseSchema,
     HelpRequestStudentSummarySchema,
     HelpRequestSubjectSummarySchema,
     HelpRequestTeacherSummarySchema,
+    HelpRequestUpdateSchema,
 )
 
 HELP_REQUEST_NOT_FOUND_MESSAGE: Final[str] = (
@@ -60,6 +63,24 @@ HELP_REQUEST_TEACHER_SUBJECT_FORBIDDEN_MESSAGE: Final[str] = (
 )
 HELP_REQUEST_TEACHER_CLASS_FORBIDDEN_MESSAGE: Final[str] = (
     "Acesso não autorizado: professor não possui atribuição ativa nesta turma."
+)
+HELP_REQUEST_STUDENT_PARTICIPANT_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: apenas o estudante autor da solicitação pode consultar ou enviar mensagens neste chamado."
+)
+HELP_REQUEST_TEACHER_PARTICIPANT_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: apenas o professor responsável pela disciplina ou a coordenação pode atender ou enviar mensagens neste chamado."
+)
+HELP_REQUEST_STATUS_UPDATE_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: apenas o professor responsável ou a coordenação pode alterar o status ou encerrar a solicitação de apoio."
+)
+HELP_REQUEST_ALREADY_CLOSED_MESSAGE: Final[str] = (
+    "Esta solicitação de apoio já foi encerrada (CLOSED) e não aceita novas mensagens ou alterações de status."
+)
+HELP_REQUEST_INVALID_STATUS_TRANSITION_MESSAGE: Final[str] = (
+    "Transição de status inválida: uma solicitação já resolvida (RESOLVED) não pode retornar ao status aberto (OPEN)."
+)
+HELP_REQUEST_INVALID_ASSIGNED_TEACHER_MESSAGE: Final[str] = (
+    "O responsável atribuído ao atendimento deve ser um usuário ativo com perfil TEACHER, COORDINATOR ou ADMIN."
 )
 
 
@@ -341,6 +362,196 @@ class HelpRequestService:
             total_pages=total_pages,
         )
 
+    def _get_authorized_help_request(
+        self,
+        help_request_id: UUID,
+        *,
+        current_user: User,
+    ) -> HelpRequest:
+        """Valida que apenas o aluno autor do pedido, o professor responsável ou a coordenação/admin acessam o chamado (BE-044)."""
+        help_request = self._repository.get_by_id(help_request_id)
+        if help_request is None:
+            raise NotFoundException(message=HELP_REQUEST_NOT_FOUND_MESSAGE)
+
+        if current_user.role == UserRole.STUDENT:
+            if help_request.student_id != current_user.id:
+                raise ForbiddenException(
+                    message=HELP_REQUEST_STUDENT_PARTICIPANT_FORBIDDEN_MESSAGE
+                )
+            return help_request
+
+        if current_user.role == UserRole.TEACHER:
+            is_assigned_owner = help_request.assigned_teacher_id == current_user.id
+            is_subject_teacher = (
+                self._repository.is_teacher_assigned_to_class_and_subject(
+                    teacher_id=current_user.id,
+                    class_id=help_request.enrollment.class_id,
+                    subject_id=help_request.subject_id,
+                )
+            )
+            if not (is_assigned_owner or is_subject_teacher):
+                raise ForbiddenException(
+                    message=HELP_REQUEST_TEACHER_PARTICIPANT_FORBIDDEN_MESSAGE
+                )
+
+        return help_request
+
+    def get_help_request_detail(
+        self,
+        help_request_id: UUID,
+        *,
+        current_user: User,
+    ) -> HelpRequestResponseSchema:
+        """Consulta um pedido de ajuda confidencial e atualiza is_read=True e read_at nas mensagens visualizadas pelo destinatário (BE-044)."""
+        help_request = self._get_authorized_help_request(
+            help_request_id,
+            current_user=current_user,
+        )
+        self._repository.mark_recipient_messages_as_read(
+            help_request,
+            viewer_id=current_user.id,
+        )
+        refreshed = (
+            self._repository.get_by_id(help_request.id, populate_existing=True)
+            or help_request
+        )
+        return self._to_response(refreshed, viewer_id=current_user.id)
+
+    def send_message(
+        self,
+        help_request_id: UUID,
+        payload: HelpRequestMessageCreateSchema,
+        *,
+        current_user: User,
+    ) -> HelpRequestResponseSchema:
+        """Envia mensagem interna em chat_messages atualizando is_read/read_at das mensagens anteriores do outro participante (BE-044)."""
+        help_request = self._get_authorized_help_request(
+            help_request_id,
+            current_user=current_user,
+        )
+
+        if help_request.status == HelpRequestStatus.CLOSED:
+            raise UnprocessableEntityException(
+                message=HELP_REQUEST_ALREADY_CLOSED_MESSAGE
+            )
+
+        now_utc = _utc_now()
+        is_staff = current_user.role in {
+            UserRole.TEACHER,
+            UserRole.COORDINATOR,
+            UserRole.ADMIN,
+        }
+        auto_assign_teacher_id = (
+            current_user.id
+            if is_staff and help_request.assigned_teacher_id is None
+            else None
+        )
+
+        updated = self._repository.create_message_and_mark_read(
+            help_request,
+            sender_id=current_user.id,
+            message_body=payload.message_body,
+            sent_at=now_utc,
+            auto_assign_teacher_id=auto_assign_teacher_id,
+            auto_transition_to_in_progress=is_staff,
+        )
+
+        logger.bind(
+            help_request_id=str(updated.id),
+            sender_id=str(current_user.id),
+            sender_role=current_user.role.value,
+            status=updated.status.value,
+        ).info(
+            "Mensagem enviada na solicitação confidencial de apoio pedagógico (BE-044)."
+        )
+
+        return self._to_response(updated, viewer_id=current_user.id)
+
+    def update_help_request(
+        self,
+        help_request_id: UUID,
+        payload: HelpRequestUpdateSchema,
+        *,
+        current_user: User,
+    ) -> HelpRequestResponseSchema:
+        """Atualiza status de atendimento (OPEN -> IN_PROGRESS -> RESOLVED -> CLOSED), resumo de resolução e closed_at (BE-044)."""
+        if current_user.role == UserRole.STUDENT:
+            raise ForbiddenException(
+                message=HELP_REQUEST_STATUS_UPDATE_FORBIDDEN_MESSAGE
+            )
+
+        help_request = self._get_authorized_help_request(
+            help_request_id,
+            current_user=current_user,
+        )
+
+        fields_set = payload.model_fields_set
+        update_resolution = "resolution_summary" in fields_set
+        update_assigned_teacher = "assigned_teacher_id" in fields_set
+        target_status = payload.status
+
+        if (
+            help_request.status == HelpRequestStatus.CLOSED
+            and target_status is not None
+            and target_status != HelpRequestStatus.CLOSED
+        ):
+            raise UnprocessableEntityException(
+                message=HELP_REQUEST_ALREADY_CLOSED_MESSAGE
+            )
+
+        if (
+            help_request.status == HelpRequestStatus.RESOLVED
+            and target_status == HelpRequestStatus.OPEN
+        ):
+            raise UnprocessableEntityException(
+                message=HELP_REQUEST_INVALID_STATUS_TRANSITION_MESSAGE
+            )
+
+        assigned_teacher_id = payload.assigned_teacher_id
+        if update_assigned_teacher and assigned_teacher_id is not None:
+            assignee = self._repository.get_user_by_id(assigned_teacher_id)
+            if (
+                assignee is None
+                or not assignee.is_active
+                or assignee.role
+                not in {UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN}
+            ):
+                raise UnprocessableEntityException(
+                    message=HELP_REQUEST_INVALID_ASSIGNED_TEACHER_MESSAGE
+                )
+        elif (
+            not update_assigned_teacher
+            and help_request.assigned_teacher_id is None
+            and current_user.role
+            in {UserRole.TEACHER, UserRole.COORDINATOR, UserRole.ADMIN}
+        ):
+            update_assigned_teacher = True
+            assigned_teacher_id = current_user.id
+
+        now_utc = _utc_now()
+        updated = self._repository.update_help_request(
+            help_request,
+            viewer_id=current_user.id,
+            now_utc=now_utc,
+            status=target_status,
+            resolution_summary=payload.resolution_summary,
+            update_resolution_summary=update_resolution,
+            assigned_teacher_id=assigned_teacher_id,
+            update_assigned_teacher=update_assigned_teacher,
+        )
+
+        logger.bind(
+            help_request_id=str(updated.id),
+            actor_id=str(current_user.id),
+            actor_role=current_user.role.value,
+            status=updated.status.value,
+            closed_at=updated.closed_at.isoformat() if updated.closed_at else None,
+        ).info(
+            "Status/resolução da solicitação confidencial de apoio atualizado (BE-044)."
+        )
+
+        return self._to_response(updated, viewer_id=current_user.id)
+
 
 def get_help_request_service(
     repository: HelpRequestRepositoryDep,
@@ -355,15 +566,21 @@ HelpRequestServiceDep = Annotated[
 ]
 
 __all__ = [
+    "HELP_REQUEST_ALREADY_CLOSED_MESSAGE",
     "HELP_REQUEST_CLASS_NOT_FOUND_MESSAGE",
+    "HELP_REQUEST_INVALID_ASSIGNED_TEACHER_MESSAGE",
+    "HELP_REQUEST_INVALID_STATUS_TRANSITION_MESSAGE",
     "HELP_REQUEST_MODULE_NOT_FOUND_MESSAGE",
     "HELP_REQUEST_MODULE_SUBJECT_MISMATCH_MESSAGE",
     "HELP_REQUEST_NOT_FOUND_MESSAGE",
     "HELP_REQUEST_ONLY_STUDENTS_CAN_CREATE_MESSAGE",
+    "HELP_REQUEST_STATUS_UPDATE_FORBIDDEN_MESSAGE",
     "HELP_REQUEST_STUDENT_NOT_ENROLLED_IN_SUBJECT_COURSE_MESSAGE",
     "HELP_REQUEST_STUDENT_NO_ACTIVE_ENROLLMENT_MESSAGE",
+    "HELP_REQUEST_STUDENT_PARTICIPANT_FORBIDDEN_MESSAGE",
     "HELP_REQUEST_SUBJECT_NOT_FOUND_MESSAGE",
     "HELP_REQUEST_TEACHER_CLASS_FORBIDDEN_MESSAGE",
+    "HELP_REQUEST_TEACHER_PARTICIPANT_FORBIDDEN_MESSAGE",
     "HELP_REQUEST_TEACHER_SUBJECT_FORBIDDEN_MESSAGE",
     "HelpRequestService",
     "HelpRequestServiceDep",
