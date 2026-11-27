@@ -60,6 +60,11 @@ from app.repositories.risk_engine_repository import (
     RiskEngineRepositoryDep,
     get_risk_engine_repository,
 )
+from app.repositories.self_assessment_repository import (
+    SelfAssessmentRepository,
+    SelfAssessmentRepositoryDep,
+    get_self_assessment_repository,
+)
 from app.repositories.subject_repository import (
     SubjectRepository,
     SubjectRepositoryDep,
@@ -96,6 +101,8 @@ __all__ = [
     "PracticalTaskRepositoryDep",
     "RiskEngineRepository",
     "RiskEngineRepositoryDep",
+    "SelfAssessmentRepository",
+    "SelfAssessmentRepositoryDep",
     "SubjectRepository",
     "SubjectRepositoryDep",
     "TeacherAssignmentRepository",
@@ -112,6 +119,7 @@ __all__ = [
     "get_learning_module_repository",
     "get_practical_task_repository",
     "get_risk_engine_repository",
+    "get_self_assessment_repository",
     "get_subject_repository",
     "get_teacher_assignment_repository",
 ]
