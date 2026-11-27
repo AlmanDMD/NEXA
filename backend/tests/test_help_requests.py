@@ -46,16 +46,25 @@ from app.schemas.enums import (
 from app.schemas.help_request import (
     HelpRequestCreateSchema,
     HelpRequestListQueryParams,
+    HelpRequestMessageCreateSchema,
+    HelpRequestUpdateSchema,
 )
 from app.schemas.user import UserProfileCreateSchema
 from app.services.help_request_service import (
+    HELP_REQUEST_ALREADY_CLOSED_MESSAGE,
     HELP_REQUEST_CLASS_NOT_FOUND_MESSAGE,
+    HELP_REQUEST_INVALID_ASSIGNED_TEACHER_MESSAGE,
+    HELP_REQUEST_INVALID_STATUS_TRANSITION_MESSAGE,
     HELP_REQUEST_MODULE_NOT_FOUND_MESSAGE,
     HELP_REQUEST_MODULE_SUBJECT_MISMATCH_MESSAGE,
+    HELP_REQUEST_NOT_FOUND_MESSAGE,
+    HELP_REQUEST_STATUS_UPDATE_FORBIDDEN_MESSAGE,
     HELP_REQUEST_STUDENT_NOT_ENROLLED_IN_SUBJECT_COURSE_MESSAGE,
     HELP_REQUEST_STUDENT_NO_ACTIVE_ENROLLMENT_MESSAGE,
+    HELP_REQUEST_STUDENT_PARTICIPANT_FORBIDDEN_MESSAGE,
     HELP_REQUEST_SUBJECT_NOT_FOUND_MESSAGE,
     HELP_REQUEST_TEACHER_CLASS_FORBIDDEN_MESSAGE,
+    HELP_REQUEST_TEACHER_PARTICIPANT_FORBIDDEN_MESSAGE,
     HELP_REQUEST_TEACHER_SUBJECT_FORBIDDEN_MESSAGE,
 )
 
@@ -910,3 +919,368 @@ async def test_list_help_requests_strict_confidentiality_and_teacher_subject_iso
             headers=coord_headers,
         )
     ).json()["message"] == HELP_REQUEST_MODULE_NOT_FOUND_MESSAGE
+
+
+def test_help_request_message_and_update_schemas_unit_validation() -> None:
+    """Valida unitariamente HelpRequestMessageCreateSchema e HelpRequestUpdateSchema (BE-044)."""
+    msg = HelpRequestMessageCreateSchema(
+        message_body="  Olá aluno, vamos revisar o micrômetro às 14h.  "
+    )
+    assert msg.message_body == "Olá aluno, vamos revisar o micrômetro às 14h."
+
+    with pytest.raises(ValidationError):
+        HelpRequestMessageCreateSchema(message_body="   ")
+
+    with pytest.raises(ValidationError):
+        HelpRequestMessageCreateSchema(message_body="a" * 4001)
+
+    upd = HelpRequestUpdateSchema(
+        status="resolved",  # type: ignore[arg-type]
+        resolution_summary="  Mentoria prática realizada na bancada 03 com sucesso.  ",
+    )
+    assert upd.status == HelpRequestStatus.RESOLVED
+    assert (
+        upd.resolution_summary
+        == "Mentoria prática realizada na bancada 03 com sucesso."
+    )
+
+    with pytest.raises(ValidationError):
+        HelpRequestUpdateSchema()
+
+    with pytest.raises(ValidationError):
+        HelpRequestUpdateSchema(status=None)
+
+    with pytest.raises(ValidationError):
+        HelpRequestUpdateSchema(resolution_summary="oi")
+
+
+@pytest.mark.asyncio
+async def test_help_request_messages_read_confirmation_status_transitions_and_closing(
+    client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida POST /api/v1/help-requests/{id}/messages, GET /api/v1/help-requests/{id} e PATCH /api/v1/help-requests/{id} (BE-044)."""
+    teacher_met, teacher_met_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="prof.met044@senai.br",
+        role=UserRole.TEACHER,
+        full_name="Prof. Metrologia 044",
+        registration_number="PROF-044-MET",
+    )
+    teacher_other, teacher_other_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="prof.outro044@senai.br",
+        role=UserRole.TEACHER,
+        full_name="Prof. Outra Disciplina 044",
+        registration_number="PROF-044-OUT",
+    )
+    coord, coord_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="coord044@senai.br",
+        role=UserRole.COORDINATOR,
+        full_name="Coordenador 044",
+        registration_number="COORD-044",
+    )
+    student_owner, student_owner_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="aluno.autor044@senai.br",
+        role=UserRole.STUDENT,
+        full_name="Aluno Autor 044",
+        registration_number="ALU-044-AUTOR",
+    )
+    student_other, student_other_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="aluno.colega044@senai.br",
+        role=UserRole.STUDENT,
+        full_name="Aluno Colega Mesma Turma 044",
+        registration_number="ALU-044-COLEGA",
+    )
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-MEC-044",
+            name="Técnico em Mecânica 044",
+            description="Curso Técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        class_a = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2026-044A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        subj_met = SubjectRepository(session).create(
+            course_id=course.id,
+            code="MET-044",
+            name="Metrologia Dimensional",
+            workload_hours=60,
+            is_active=True,
+        )
+        subj_tor = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-044",
+            name="Tornearia Mecânica",
+            workload_hours=80,
+            is_active=True,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher_met.id,
+                    class_id=class_a.id,
+                    subject_id=subj_met.id,
+                    is_main_teacher=True,
+                ),
+                TeacherAssignment(
+                    teacher_id=teacher_other.id,
+                    class_id=class_a.id,
+                    subject_id=subj_tor.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student_owner.id,
+                    class_id=class_a.id,
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=student_other.id,
+                    class_id=class_a.id,
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+        session.commit()
+
+    owner_headers = {"Authorization": f"Bearer {student_owner_token}"}
+    other_stu_headers = {"Authorization": f"Bearer {student_other_token}"}
+    t_met_headers = {"Authorization": f"Bearer {teacher_met_token}"}
+    t_other_headers = {"Authorization": f"Bearer {teacher_other_token}"}
+    coord_headers = {"Authorization": f"Bearer {coord_token}"}
+
+    # Aluno Autor abre solicitação confidencial em Metrologia (status inicial: OPEN)
+    create_res = await client.post(
+        "/api/v1/help-requests",
+        headers=owner_headers,
+        json={
+            "subject_id": str(subj_met.id),
+            "category": "PRACTICAL_DIFFICULTY",
+            "subject_title": "Dificuldade com aferição no micrômetro interno",
+            "description": "Não consegui estabilizar as pontas de medição dentro do furo calibrado.",
+        },
+    )
+    assert create_res.status_code == status.HTTP_201_CREATED
+    hr_id = UUID(create_res.json()["id"])
+    assert create_res.json()["status"] == "OPEN"
+
+    # 1. ISOLAMENTO E SIGILO (Critério 1):
+    # - Outro aluno da mesma turma NÃO pode visualizar (GET), enviar mensagem (POST) ou alterar (PATCH) -> 403
+    assert (
+        await client.get(
+            f"/api/v1/help-requests/{hr_id}",
+            headers=other_stu_headers,
+        )
+    ).status_code == status.HTTP_403_FORBIDDEN
+
+    other_stu_msg = await client.post(
+        f"/api/v1/help-requests/{hr_id}/messages",
+        headers=other_stu_headers,
+        json={"message_body": "Tentativa de invasão por outro colega."},
+    )
+    assert other_stu_msg.status_code == status.HTTP_403_FORBIDDEN
+    assert (
+        other_stu_msg.json()["message"]
+        == HELP_REQUEST_STUDENT_PARTICIPANT_FORBIDDEN_MESSAGE
+    )
+
+    # - Professor de outra disciplina (Tornearia) NÃO pode visualizar, enviar mensagem ou alterar chamado de Metrologia -> 403
+    assert (
+        await client.get(
+            f"/api/v1/help-requests/{hr_id}",
+            headers=t_other_headers,
+        )
+    ).status_code == status.HTTP_403_FORBIDDEN
+
+    other_t_msg = await client.post(
+        f"/api/v1/help-requests/{hr_id}/messages",
+        headers=t_other_headers,
+        json={"message_body": "Professor de outra disciplina tentando responder."},
+    )
+    assert other_t_msg.status_code == status.HTTP_403_FORBIDDEN
+    assert (
+        other_t_msg.json()["message"]
+        == HELP_REQUEST_TEACHER_PARTICIPANT_FORBIDDEN_MESSAGE
+    )
+
+    other_t_patch = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=t_other_headers,
+        json={"status": "IN_PROGRESS"},
+    )
+    assert other_t_patch.status_code == status.HTTP_403_FORBIDDEN
+    assert (
+        other_t_patch.json()["message"]
+        == HELP_REQUEST_TEACHER_PARTICIPANT_FORBIDDEN_MESSAGE
+    )
+
+    # - O próprio estudante autor NÃO pode alterar o status do chamado via PATCH -> 403
+    stu_patch = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=owner_headers,
+        json={"status": "RESOLVED"},
+    )
+    assert stu_patch.status_code == status.HTTP_403_FORBIDDEN
+    assert stu_patch.json()["message"] == HELP_REQUEST_STATUS_UPDATE_FORBIDDEN_MESSAGE
+
+    # - Chamado inexistente -> 404
+    not_found_msg = await client.post(
+        f"/api/v1/help-requests/{uuid4()}/messages",
+        headers=owner_headers,
+        json={"message_body": "Chamado inexistente."},
+    )
+    assert not_found_msg.status_code == status.HTTP_404_NOT_FOUND
+    assert not_found_msg.json()["message"] == HELP_REQUEST_NOT_FOUND_MESSAGE
+
+    # 2. TROCA DE MENSAGENS E CONFIRMAÇÃO DE LEitura (Critério 2):
+    # Aluno envia 1ª mensagem complementar no chamado
+    msg1_res = await client.post(
+        f"/api/v1/help-requests/{hr_id}/messages",
+        headers=owner_headers,
+        json={
+            "message_body": "Professor, estarei disponível no laboratório hoje às 10h30."
+        },
+    )
+    assert msg1_res.status_code == status.HTTP_201_CREATED
+    msg1_body = msg1_res.json()
+    assert len(msg1_body["messages"]) == 1
+    assert msg1_body["messages"][0]["is_read"] is False
+    assert msg1_body["messages"][0]["read_at"] is None
+    assert msg1_body["messages"][0]["sender_id"] == str(student_owner.id)
+    assert msg1_body["status"] == "OPEN"
+
+    # Antes de abrir o chamado, na listagem GET do professor há 1 mensagem não lida
+    t_list_before = await client.get("/api/v1/help-requests", headers=t_met_headers)
+    assert t_list_before.json()["data"][0]["unread_messages_count"] == 1
+
+    # Professor responde com POST /api/v1/help-requests/{id}/messages:
+    # -> Marca a mensagem anterior do aluno como lida (is_read=True e read_at preenchido)
+    # -> Cria a mensagem do professor (is_read=False para o aluno)
+    # -> Transiciona automaticamente o chamado de OPEN para IN_PROGRESS
+    msg2_res = await client.post(
+        f"/api/v1/help-requests/{hr_id}/messages",
+        headers=t_met_headers,
+        json={
+            "message_body": "Perfeito! Vamos fazer a mentoria às 10h30 na Bancada 02."
+        },
+    )
+    assert msg2_res.status_code == status.HTTP_201_CREATED
+    msg2_body = msg2_res.json()
+    assert msg2_body["status"] == "IN_PROGRESS"
+    assert len(msg2_body["messages"]) == 2
+    # Mensagem 1 (do aluno) agora está lida pelo professor!
+    assert msg2_body["messages"][0]["is_read"] is True
+    assert msg2_body["messages"][0]["read_at"] is not None
+    # Mensagem 2 (do professor) ainda não foi lida pelo aluno
+    assert msg2_body["messages"][1]["is_read"] is False
+    assert msg2_body["messages"][1]["read_at"] is None
+
+    # Quando o aluno visualiza o chamado via GET /api/v1/help-requests/{id},
+    # a mensagem do professor é marcada como is_read=True e read_at preenchido!
+    stu_view_res = await client.get(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=owner_headers,
+    )
+    assert stu_view_res.status_code == status.HTTP_200_OK
+    stu_view_body = stu_view_res.json()
+    assert stu_view_body["unread_messages_count"] == 0
+    assert stu_view_body["messages"][1]["is_read"] is True
+    assert stu_view_body["messages"][1]["read_at"] is not None
+
+    # 3. TRANSIÇÕES DE STATUS E ENCERRAMENTO COM closed_at (Critério 3):
+    # OPEN -> IN_PROGRESS -> RESOLVED com resolution_summary
+    resolve_res = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=t_met_headers,
+        json={
+            "status": "RESOLVED",
+            "resolution_summary": "Mentoria prática realizada na Bancada 02; estudante aferiu 3 peças com sucesso.",
+        },
+    )
+    assert resolve_res.status_code == status.HTTP_200_OK
+    resolved_body = resolve_res.json()
+    assert resolved_body["status"] == "RESOLVED"
+    assert (
+        resolved_body["resolution_summary"]
+        == "Mentoria prática realizada na Bancada 02; estudante aferiu 3 peças com sucesso."
+    )
+    assert resolved_body["closed_at"] is None
+
+    # Transição inválida: RESOLVED -> OPEN deve retornar HTTP 422
+    invalid_reopen = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=t_met_headers,
+        json={"status": "OPEN"},
+    )
+    assert invalid_reopen.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert (
+        invalid_reopen.json()["message"]
+        == HELP_REQUEST_INVALID_STATUS_TRANSITION_MESSAGE
+    )
+
+    # Tentativa de atribuir um estudante como assigned_teacher_id -> 422
+    invalid_assignee = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=coord_headers,
+        json={"assigned_teacher_id": str(student_owner.id)},
+    )
+    assert invalid_assignee.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert (
+        invalid_assignee.json()["message"]
+        == HELP_REQUEST_INVALID_ASSIGNED_TEACHER_MESSAGE
+    )
+
+    # Encerramento definitivo (RESOLVED -> CLOSED) pelo professor ou coordenação registra closed_at
+    close_res = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=coord_headers,
+        json={
+            "status": "CLOSED",
+            "resolution_summary": "Mentoria concluída e validada pela coordenação pedagógica.",
+        },
+    )
+    assert close_res.status_code == status.HTTP_200_OK
+    closed_body = close_res.json()
+    assert closed_body["status"] == "CLOSED"
+    assert closed_body["closed_at"] is not None
+    assert (
+        closed_body["resolution_summary"]
+        == "Mentoria concluída e validada pela coordenação pedagógica."
+    )
+
+    # Chamado já CLOSED não pode regressar para IN_PROGRESS nem receber novas mensagens -> 422
+    reopen_closed = await client.patch(
+        f"/api/v1/help-requests/{hr_id}",
+        headers=coord_headers,
+        json={"status": "IN_PROGRESS"},
+    )
+    assert reopen_closed.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert reopen_closed.json()["message"] == HELP_REQUEST_ALREADY_CLOSED_MESSAGE
+
+    msg_after_closed = await client.post(
+        f"/api/v1/help-requests/{hr_id}/messages",
+        headers=owner_headers,
+        json={"message_body": "Tentando enviar mensagem após encerramento."},
+    )
+    assert msg_after_closed.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert msg_after_closed.json()["message"] == HELP_REQUEST_ALREADY_CLOSED_MESSAGE
+

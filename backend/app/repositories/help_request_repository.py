@@ -1,5 +1,6 @@
 """Repositório SQLAlchemy 2.0 para Solicitações de Apoio Confidenciais (help_requests - DB-042 / BE-043)."""
 
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
+from app.models.base import _utc_now
 from app.models.enrollment import Enrollment
 from app.models.help_request import ChatMessage, HelpRequest
 from app.models.learning_module import LearningModule
@@ -34,7 +36,12 @@ class HelpRequestRepository:
         """Retorna a sessão SQLAlchemy ativa."""
         return self._session
 
-    def get_by_id(self, help_request_id: UUID) -> HelpRequest | None:
+    def get_by_id(
+        self,
+        help_request_id: UUID,
+        *,
+        populate_existing: bool = False,
+    ) -> HelpRequest | None:
         """Busca uma solicitação de apoio pelo UUID carregando aluno, matrícula/turma, disciplina, módulo, docente e mensagens."""
         stmt = (
             select(HelpRequest)
@@ -52,6 +59,8 @@ class HelpRequestRepository:
             )
             .where(HelpRequest.id == help_request_id)
         )
+        if populate_existing:
+            stmt = stmt.execution_options(populate_existing=True)
         return self._session.scalar(stmt)
 
     def get_class_by_id(self, class_id: UUID) -> AcademicClass | None:
@@ -69,6 +78,34 @@ class HelpRequestRepository:
         return self._session.scalar(
             select(LearningModule).where(LearningModule.id == module_id)
         )
+
+    def get_user_by_id(self, user_id: UUID) -> User | None:
+        """Busca um usuário pelo UUID carregando seu perfil."""
+        stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(User.id == user_id)
+        )
+        return self._session.scalar(stmt)
+
+    def is_teacher_assigned_to_class_and_subject(
+        self,
+        *,
+        teacher_id: UUID,
+        class_id: UUID,
+        subject_id: UUID,
+    ) -> bool:
+        """Verifica se o docente possui atribuição ativa na turma e disciplina do chamado."""
+        stmt = (
+            select(TeacherAssignment.id)
+            .where(
+                TeacherAssignment.teacher_id == teacher_id,
+                TeacherAssignment.class_id == class_id,
+                TeacherAssignment.subject_id == subject_id,
+            )
+            .limit(1)
+        )
+        return self._session.scalar(stmt) is not None
 
     def get_student_active_enrollment_for_course(
         self,
@@ -253,6 +290,129 @@ class HelpRequestRepository:
         )
         items = list(self._session.scalars(items_stmt).unique().all())
         return items, total
+
+    def mark_recipient_messages_as_read(
+        self,
+        help_request: HelpRequest,
+        *,
+        viewer_id: UUID,
+        read_at: datetime | None = None,
+        commit: bool = True,
+    ) -> int:
+        """Marca como lidas (is_read=True e read_at) todas as mensagens enviadas pela outra parte (sender_id != viewer_id)."""
+        now_utc = read_at or _utc_now()
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+        else:
+            now_utc = now_utc.astimezone(timezone.utc)
+
+        updated_count = 0
+        for msg in help_request.messages or []:
+            if not msg.is_read and msg.sender_id != viewer_id:
+                sent_utc = msg.sent_at
+                if sent_utc is not None:
+                    sent_utc = (
+                        sent_utc.replace(tzinfo=timezone.utc)
+                        if sent_utc.tzinfo is None
+                        else sent_utc.astimezone(timezone.utc)
+                    )
+                effective_read_at = (
+                    sent_utc if sent_utc and sent_utc > now_utc else now_utc
+                )
+                msg.is_read = True
+                msg.read_at = effective_read_at
+                self._session.add(msg)
+                updated_count += 1
+
+        if updated_count > 0 and commit:
+            self._session.commit()
+        return updated_count
+
+    def create_message_and_mark_read(
+        self,
+        help_request: HelpRequest,
+        *,
+        sender_id: UUID,
+        message_body: str,
+        sent_at: datetime,
+        auto_assign_teacher_id: UUID | None = None,
+        auto_transition_to_in_progress: bool = False,
+    ) -> HelpRequest:
+        """Marca mensagens pendentes da outra parte como lidas, insere nova mensagem em chat_messages e atualiza o chamado."""
+        self.mark_recipient_messages_as_read(
+            help_request,
+            viewer_id=sender_id,
+            read_at=sent_at,
+            commit=False,
+        )
+
+        if (
+            auto_assign_teacher_id is not None
+            and help_request.assigned_teacher_id is None
+        ):
+            help_request.assigned_teacher_id = auto_assign_teacher_id
+
+        if (
+            auto_transition_to_in_progress
+            and help_request.status == HelpRequestStatus.OPEN
+        ):
+            help_request.status = HelpRequestStatus.IN_PROGRESS
+
+        message = ChatMessage(
+            help_request_id=help_request.id,
+            sender_id=sender_id,
+            message_body=message_body,
+            is_read=False,
+            read_at=None,
+            sent_at=sent_at,
+        )
+        help_request.updated_at = sent_at
+        self._session.add(message)
+        self._session.add(help_request)
+        self._session.commit()
+        return (
+            self.get_by_id(help_request.id, populate_existing=True) or help_request
+        )
+
+    def update_help_request(
+        self,
+        help_request: HelpRequest,
+        *,
+        viewer_id: UUID,
+        now_utc: datetime,
+        status: HelpRequestStatus | None = None,
+        resolution_summary: str | None = None,
+        update_resolution_summary: bool = False,
+        assigned_teacher_id: UUID | None = None,
+        update_assigned_teacher: bool = False,
+    ) -> HelpRequest:
+        """Atualiza status, resumo de resolução, assigned_teacher_id, closed_at e marca mensagens pendentes como lidas (BE-044)."""
+        self.mark_recipient_messages_as_read(
+            help_request,
+            viewer_id=viewer_id,
+            read_at=now_utc,
+            commit=False,
+        )
+
+        if update_assigned_teacher:
+            help_request.assigned_teacher_id = assigned_teacher_id
+
+        if update_resolution_summary:
+            help_request.resolution_summary = resolution_summary
+
+        if status is not None:
+            help_request.status = status
+            if status == HelpRequestStatus.CLOSED:
+                help_request.closed_at = now_utc
+            else:
+                help_request.closed_at = None
+
+        help_request.updated_at = now_utc
+        self._session.add(help_request)
+        self._session.commit()
+        return (
+            self.get_by_id(help_request.id, populate_existing=True) or help_request
+        )
 
 
 def get_help_request_repository(

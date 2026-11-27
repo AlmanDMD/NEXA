@@ -1,11 +1,11 @@
 """Schemas Pydantic v2 para Abertura e Consulta de Solicitações de Apoio Confidenciais (BE-043)."""
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 from uuid import UUID
 
 from fastapi import Query
-from pydantic import BeforeValidator, Field
+from pydantic import BeforeValidator, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from app.schemas.base import BaseResponseSchema, StrictRequestSchema
@@ -15,7 +15,7 @@ from app.schemas.enums import (
     HelpRequestStatus,
     UserRole,
 )
-from app.schemas.validators import sanitize_text
+from app.schemas.validators import sanitize_optional_text, sanitize_text
 
 
 def validate_help_request_subject_title_pt(value: Any) -> str:
@@ -110,6 +110,42 @@ def validate_optional_help_request_status_pt(
     return validate_help_request_status_pt(value)
 
 
+def validate_help_request_message_body_pt(value: Any) -> str:
+    """Sanitiza e valida o corpo de mensagem interna em chat_messages (1 a 4000 caracteres)."""
+    cleaned = sanitize_text(value, collapse_spaces=False)
+    if len(cleaned) < 1:
+        raise PydanticCustomError(
+            "help_request_message_body_too_short",
+            "O conteúdo da mensagem (message_body) não pode ser vazio.",
+        )
+    if len(cleaned) > 4000:
+        raise PydanticCustomError(
+            "help_request_message_body_too_long",
+            "O conteúdo da mensagem (message_body) deve ter no máximo 4000 caracteres.",
+        )
+    return cleaned
+
+
+def validate_optional_help_request_resolution_summary_pt(
+    value: Any,
+) -> str | None:
+    """Sanitiza e valida o resumo opcional da orientação pedagógica (3 a 4000 caracteres quando informado)."""
+    cleaned = sanitize_optional_text(value, collapse_spaces=False)
+    if cleaned is None:
+        return None
+    if len(cleaned) < 3:
+        raise PydanticCustomError(
+            "help_request_resolution_summary_too_short",
+            "O resumo da resolução (resolution_summary) deve ter pelo menos 3 caracteres.",
+        )
+    if len(cleaned) > 4000:
+        raise PydanticCustomError(
+            "help_request_resolution_summary_too_long",
+            "O resumo da resolução (resolution_summary) deve ter no máximo 4000 caracteres.",
+        )
+    return cleaned
+
+
 type HelpRequestSubjectTitleStr = Annotated[
     str,
     BeforeValidator(validate_help_request_subject_title_pt),
@@ -139,6 +175,37 @@ type HelpRequestCategoryField = Annotated[
     ),
 ]
 
+type HelpRequestStatusField = Annotated[
+    HelpRequestStatus,
+    BeforeValidator(validate_help_request_status_pt),
+    Field(
+        description="Status do ciclo de atendimento do pedido (OPEN, IN_PROGRESS, RESOLVED, CLOSED)",
+        examples=[HelpRequestStatus.IN_PROGRESS],
+    ),
+]
+
+type HelpRequestMessageBodyStr = Annotated[
+    str,
+    BeforeValidator(validate_help_request_message_body_pt),
+    Field(
+        description="Conteúdo textual da mensagem interna enviada no chamado (1 a 4000 caracteres)",
+        examples=[
+            "Olá! Podemos fazer uma mentoria prática hoje às 10h30 na Bancada 02 de Metrologia."
+        ],
+    ),
+]
+
+type OptionalHelpRequestResolutionSummaryStr = Annotated[
+    str | None,
+    BeforeValidator(validate_optional_help_request_resolution_summary_pt),
+    Field(
+        description="Resumo da orientação pedagógica ou mentoria realizada (3 a 4000 caracteres)",
+        examples=[
+            "Mentoria individual realizada na bancada 02 com calibração guiada do micrômetro externo 0-25mm."
+        ],
+    ),
+]
+
 
 class HelpRequestCreateSchema(StrictRequestSchema):
     """Payload de entrada para abertura de solicitação confidencial de apoio pelo aluno (POST /api/v1/help-requests)."""
@@ -157,6 +224,39 @@ class HelpRequestCreateSchema(StrictRequestSchema):
         default=True,
         description="Garante confidencialidade estrita perante outros estudantes (True por padrão)",
     )
+
+
+class HelpRequestMessageCreateSchema(StrictRequestSchema):
+    """Payload de entrada para envio de mensagem interna em chamado confidencial (POST /api/v1/help-requests/{id}/messages - BE-044)."""
+
+    message_body: HelpRequestMessageBodyStr
+
+
+class HelpRequestUpdateSchema(StrictRequestSchema):
+    """Payload de entrada para atendimento, transição de status e encerramento de pedido de ajuda (PATCH /api/v1/help-requests/{id} - BE-044)."""
+
+    status: HelpRequestStatusField | None = None
+    resolution_summary: OptionalHelpRequestResolutionSummaryStr = None
+    assigned_teacher_id: UUID | None = Field(
+        default=None,
+        description="Permite atribuir ou reatribuir o docente responsável pelo chamado",
+    )
+
+    @model_validator(mode="after")
+    def validate_at_least_one_field(self) -> Self:
+        """Garante que ao menos um campo editável tenha sido enviado no payload de atualização."""
+        updatable = {"status", "resolution_summary", "assigned_teacher_id"}
+        if not (self.model_fields_set & updatable):
+            raise PydanticCustomError(
+                "empty_help_request_update",
+                "Informe ao menos um campo para atualizar a solicitação de apoio.",
+            )
+        if "status" in self.model_fields_set and self.status is None:
+            raise PydanticCustomError(
+                "null_help_request_status",
+                "O campo 'status' não pode ser nulo na atualização da solicitação de apoio.",
+            )
+        return self
 
 
 class HelpRequestStudentSummarySchema(BaseResponseSchema):
@@ -367,17 +467,24 @@ __all__ = [
     "HelpRequestDescriptionStr",
     "HelpRequestListParamsDep",
     "HelpRequestListQueryParams",
+    "HelpRequestMessageBodyStr",
+    "HelpRequestMessageCreateSchema",
     "HelpRequestModuleSummarySchema",
     "HelpRequestPaginatedResponseSchema",
     "HelpRequestResponseSchema",
+    "HelpRequestStatusField",
     "HelpRequestStudentSummarySchema",
     "HelpRequestSubjectSummarySchema",
     "HelpRequestSubjectTitleStr",
     "HelpRequestTeacherSummarySchema",
+    "HelpRequestUpdateSchema",
+    "OptionalHelpRequestResolutionSummaryStr",
     "validate_help_request_category_pt",
     "validate_help_request_description_pt",
+    "validate_help_request_message_body_pt",
     "validate_help_request_status_pt",
     "validate_help_request_subject_title_pt",
     "validate_optional_help_request_category_pt",
+    "validate_optional_help_request_resolution_summary_pt",
     "validate_optional_help_request_status_pt",
 ]
