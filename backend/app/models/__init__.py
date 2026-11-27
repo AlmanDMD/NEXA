@@ -24,6 +24,7 @@ from app.models.class_lesson import (
 from app.models.competency import Competency
 from app.models.course import Course
 from app.models.enrollment import Enrollment
+from app.models.help_request import ChatMessage, HelpRequest
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
 from app.models.practical_task import (
@@ -55,12 +56,14 @@ __all__ = [
     "AuditLog",
     "AuthSession",
     "Base",
+    "ChatMessage",
     "ClassAnnouncement",
     "ClassLesson",
     "Competency",
     "Course",
     "Enrollment",
     "ExplainableDiagnostic",
+    "HelpRequest",
     "LearningModule",
     "ModuleCompetency",
     "PracticalTask",
