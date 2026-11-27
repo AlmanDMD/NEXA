@@ -32,6 +32,7 @@ from app.models.practical_task import (
     TaskCriterion,
     TaskSubmission,
 )
+from app.models.student_milestone_history import StudentMilestoneHistory
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User, UserProfile
@@ -53,6 +54,7 @@ __all__ = [
     "PracticalTask",
     "SkillEvidence",
     "StudentGrade",
+    "StudentMilestoneHistory",
     "Subject",
     "SubmissionEvaluation",
     "TaskCriterion",

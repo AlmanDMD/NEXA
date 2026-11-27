@@ -106,6 +106,15 @@ class AlertStatus(StrEnum):
     RESOLVED = "RESOLVED"
 
 
+class MilestoneType(StrEnum):
+    """Tipos de marcos da linha do tempo acadêmica do estudante — 'milestone_type_enum' (DB-039)."""
+
+    MODULE_COMPLETED = "MODULE_COMPLETED"
+    SKILL_LEVEL_UP = "SKILL_LEVEL_UP"
+    PERFECT_ATTENDANCE = "PERFECT_ATTENDANCE"
+    RECOVERY_ACHIEVED = "RECOVERY_ACHIEVED"
+
+
 __all__ = [
     "AcademicStandingStatus",
     "AlertCategory",
@@ -115,6 +124,7 @@ __all__ = [
     "ClassStatus",
     "CompetencyCategory",
     "EnrollmentStatus",
+    "MilestoneType",
     "RiskLevel",
     "Shift",
     "SubmissionStatus",

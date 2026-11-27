@@ -32,6 +32,7 @@ from app.models.practical_task import (
     TaskCriterion,
     TaskSubmission,
 )
+from app.models.student_milestone_history import StudentMilestoneHistory
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User
@@ -43,6 +44,7 @@ class DashboardRepository:
 
     def __init__(self, session: Session) -> None:
         self._session = session
+        self._views_verified: bool = False
 
     @property
     def session(self) -> Session:
@@ -51,7 +53,12 @@ class DashboardRepository:
 
     def ensure_analytical_views(self) -> None:
         """Garante que as views vw_student_360_performance e vw_module_attendance_risk existam na conexão atual."""
+        if self._views_verified:
+            return
         bind = self._session.get_bind()
+        if getattr(bind, "_nexa_analytical_views_ready", False):
+            self._views_verified = True
+            return
         view_names = {name.lower() for name in inspect(bind).get_view_names()}
         created_any = False
         if VW_MODULE_ATTENDANCE_RISK_NAME.lower() not in view_names:
@@ -62,6 +69,11 @@ class DashboardRepository:
             created_any = True
         if created_any:
             self._session.commit()
+        try:
+            setattr(bind, "_nexa_analytical_views_ready", True)
+        except Exception:
+            pass
+        self._views_verified = True
 
     def get_class_by_id(self, class_id: UUID) -> AcademicClass | None:
         """Busca uma turma acadêmica pelo UUID carregando o curso associado."""
@@ -334,6 +346,30 @@ class DashboardRepository:
             else_=4,
         )
         stmt = stmt.order_by(severity_order.asc(), AcademicAlert.created_at.desc())
+        return list(self._session.scalars(stmt).all())
+
+    def list_student_milestones(
+        self,
+        student_id: UUID,
+        *,
+        enrollment_id: UUID | None = None,
+    ) -> list[StudentMilestoneHistory]:
+        """Lista a linha do tempo de marcos acadêmicos do estudante (student_milestone_history - DB-039)."""
+        stmt = (
+            select(StudentMilestoneHistory)
+            .options(
+                joinedload(StudentMilestoneHistory.module).joinedload(
+                    LearningModule.subject
+                )
+            )
+            .where(StudentMilestoneHistory.student_id == student_id)
+        )
+        if enrollment_id is not None:
+            stmt = stmt.where(StudentMilestoneHistory.enrollment_id == enrollment_id)
+        stmt = stmt.order_by(
+            StudentMilestoneHistory.achieved_at.desc(),
+            StudentMilestoneHistory.id.asc(),
+        )
         return list(self._session.scalars(stmt).all())
 
 

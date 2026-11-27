@@ -18,7 +18,10 @@ from app.schemas.academic_assessment import (
     StudentModuleAverageSchema,
     StudentSubjectAverageSchema,
 )
-from app.schemas.class_lesson import ModuleAttendanceRiskItemSchema
+from app.schemas.class_lesson import (
+    ModuleAttendanceRiskItemSchema,
+    SubjectConsolidatedAttendanceSchema,
+)
 from app.schemas.dashboard import (
     DashboardStudent360SummaryItemSchema,
     DashboardStudentProfileSchema,
@@ -27,6 +30,11 @@ from app.schemas.dashboard import (
     Student360QueryParams,
     StudentActiveAlertItemSchema,
     StudentCompetencyRadarItemSchema,
+    StudentMilestoneTimelineItemSchema,
+    StudentModuleProgressItemSchema,
+    StudentPortalAttendanceSummarySchema,
+    StudentPortalDashboardQueryParams,
+    StudentPortalDashboardResponseSchema,
     TeacherClassDashboardQueryParams,
     TeacherClassDashboardResponseSchema,
     TeacherDashboardKpisSchema,
@@ -38,6 +46,10 @@ from app.schemas.enums import (
     RiskLevel,
     SubmissionStatus,
     UserRole,
+)
+from app.schemas.practical_task import (
+    StudentPendingTaskItemSchema,
+    StudentTaskCountsSummarySchema,
 )
 from app.services.academic_assessment_service import (
     classify_academic_standing,
@@ -861,6 +873,658 @@ class DashboardService:
             competencies=competencies_radar,
             practical_submissions=practical_submissions_schemas,
             active_alerts=active_alerts_schemas,
+        )
+
+    def get_student_portal_dashboard(
+        self,
+        params: StudentPortalDashboardQueryParams | None = None,
+        *,
+        current_user: User,
+    ) -> StudentPortalDashboardResponseSchema:
+        """Retorna o painel privado do estudante autenticado com progresso, frequência, radar e linha do tempo (BE-034).
+
+        - Utiliza exclusivamente current_user.id extraído do token JWT.
+        - Nunca consulta ou expõe observações pedagógicas restritas dos professores.
+        """
+        student = current_user
+
+        requested_class_id = params.class_id if params is not None else None
+        if requested_class_id is not None:
+            if self._repository.get_class_by_id(requested_class_id) is None:
+                raise NotFoundException(message=DASHBOARD_CLASS_NOT_FOUND_MESSAGE)
+
+        enrollments = self._repository.list_student_enrollments(
+            student.id,
+            class_id=requested_class_id,
+        )
+        if requested_class_id is not None and not enrollments:
+            raise NotFoundException(message=DASHBOARD_ENROLLMENT_NOT_FOUND_MESSAGE)
+
+        profile = student.profile
+        student_profile = DashboardStudentProfileSchema(
+            id=student.id,
+            email=student.email,
+            full_name=profile.full_name if profile is not None else None,
+            registration_number=(
+                profile.registration_number if profile is not None else None
+            ),
+            avatar_url=profile.avatar_url if profile is not None else None,
+        )
+        now = _utc_now()
+
+        if not enrollments:
+            empty_att_metrics = compute_attendance_margin_metrics(
+                total_hours=0,
+                attended_hours=0,
+                absent_hours=0,
+                planned_hours=0,
+            )
+            empty_attendance = StudentPortalAttendanceSummarySchema(
+                planned_hours=0,
+                total_hours=0,
+                attended_hours=0,
+                absent_hours=0,
+                justified_absent_hours=0,
+                critical_modules_count=0,
+                by_subject=[],
+                by_module=[],
+                **empty_att_metrics,
+            )
+            empty_counts = StudentTaskCountsSummarySchema(
+                pending_count=0,
+                late_count=0,
+                completed_count=0,
+                submitted_count=0,
+                evaluated_count=0,
+                total_count=0,
+            )
+            return StudentPortalDashboardResponseSchema(
+                student_id=student.id,
+                student=student_profile,
+                enrollment_id=None,
+                class_id=None,
+                enrollment_status=None,
+                academic_class=None,
+                course_code=None,
+                course_name=None,
+                generated_at=now,
+                overall_average=None,
+                overall_progress_percentage=Decimal("0.00"),
+                attendance_percentage=Decimal("100.00"),
+                standing_status=AcademicStandingStatus.APPROVED,
+                risk_level=RiskLevel.LOW,
+                overview=None,
+                attendance_summary=empty_attendance,
+                subjects=[],
+                attendance_by_module=[],
+                modules_progress=[],
+                competencies=[],
+                competencies_radar=[],
+                task_counts=empty_counts,
+                activity_counters=empty_counts,
+                upcoming_tasks=[],
+                practical_submissions=[],
+                timeline=[],
+                milestone_history=[],
+            )
+
+        primary_enrollment = enrollments[0]
+        academic_class = primary_enrollment.academic_class
+        course = academic_class.course
+
+        view_360_row = self._repository.query_student_360_view_by_enrollment(
+            primary_enrollment.id
+        )
+        overview = (
+            self._map_view_row_to_student_summary(view_360_row)
+            if view_360_row is not None
+            else None
+        )
+
+        # 1. Frequência por módulo e por disciplina via vw_module_attendance_risk (DB-037)
+        att_rows = self._repository.query_class_module_attendance_view(
+            academic_class.id,
+            student_id=student.id,
+            exclude_dropped=False,
+        )
+        attendance_by_module: list[ModuleAttendanceRiskItemSchema] = []
+        att_item_by_module_id: dict[UUID, ModuleAttendanceRiskItemSchema] = {}
+        mods_att_by_subject: dict[UUID, list[ModuleAttendanceRiskItemSchema]] = {}
+
+        for row in att_rows:
+            total_h = int(row["total_hours"] or 0)
+            attended_h = int(row["attended_hours"] or 0)
+            absent_h = int(row["absent_hours"] or 0)
+            justified_h = int(row["justified_absent_hours"] or 0)
+            planned_h = int(row["module_planned_hours"] or 0)
+            metrics = compute_attendance_margin_metrics(
+                total_hours=total_h,
+                attended_hours=attended_h,
+                absent_hours=absent_h,
+                planned_hours=planned_h,
+            )
+            mod_att_item = ModuleAttendanceRiskItemSchema(
+                enrollment_id=UUID(str(row["enrollment_id"])),
+                class_id=UUID(str(row["class_id"])),
+                class_code=str(row["class_code"]),
+                class_period=str(row["class_period"]),
+                subject_id=UUID(str(row["subject_id"])),
+                subject_code=str(row["subject_code"]),
+                subject_name=str(row["subject_name"]),
+                module_id=UUID(str(row["module_id"])),
+                module_title=str(row["module_title"]),
+                order_index=int(row["module_order_index"]),
+                planned_hours=planned_h,
+                total_hours=total_h,
+                attended_hours=attended_h,
+                absent_hours=absent_h,
+                justified_absent_hours=justified_h,
+                **metrics,
+            )
+            attendance_by_module.append(mod_att_item)
+            att_item_by_module_id[mod_att_item.module_id] = mod_att_item
+            mods_att_by_subject.setdefault(mod_att_item.subject_id, []).append(
+                mod_att_item
+            )
+
+        # 2. Carrega disciplinas, avaliações formativas, submissões práticas, evidências e marcos
+        subjects = self._repository.list_course_subjects_with_modules_and_competencies(
+            academic_class.course_id
+        )
+        assessments = self._repository.list_class_assessments_with_grades(
+            academic_class.id
+        )
+        detailed_submissions = self._repository.list_student_detailed_submissions(
+            student.id,
+            class_id=academic_class.id,
+        )
+        skill_evidences = self._repository.list_skill_evidences_for_students(
+            [student.id]
+        )
+        milestones_orm = self._repository.list_student_milestones(
+            student.id,
+            enrollment_id=primary_enrollment.id,
+        )
+
+        # 3. Consolida resumo de frequência por disciplina e global
+        subject_attendance_list: list[SubjectConsolidatedAttendanceSchema] = []
+        overall_planned_h = 0
+        overall_total_h = 0
+        overall_attended_h = 0
+        overall_absent_h = 0
+        overall_justified_h = 0
+
+        for subj in subjects:
+            subj_att_mods = sorted(
+                mods_att_by_subject.get(subj.id, []),
+                key=lambda item: (item.order_index, item.module_title.lower()),
+            )
+            s_total_h = sum(m.total_hours for m in subj_att_mods)
+            s_attended_h = sum(m.attended_hours for m in subj_att_mods)
+            s_absent_h = sum(m.absent_hours for m in subj_att_mods)
+            s_justified_h = sum(m.justified_absent_hours for m in subj_att_mods)
+            s_planned_h = max(
+                int(subj.workload_hours),
+                sum(m.planned_hours for m in subj_att_mods),
+            )
+            s_att_metrics = compute_attendance_margin_metrics(
+                total_hours=s_total_h,
+                attended_hours=s_attended_h,
+                absent_hours=s_absent_h,
+                planned_hours=s_planned_h,
+            )
+            subject_attendance_list.append(
+                SubjectConsolidatedAttendanceSchema(
+                    enrollment_id=primary_enrollment.id,
+                    class_id=academic_class.id,
+                    class_code=academic_class.code,
+                    class_period=academic_class.period,
+                    subject_id=subj.id,
+                    subject_code=subj.code,
+                    subject_name=subj.name,
+                    planned_hours=s_planned_h,
+                    total_hours=s_total_h,
+                    attended_hours=s_attended_h,
+                    absent_hours=s_absent_h,
+                    justified_absent_hours=s_justified_h,
+                    modules=subj_att_mods,
+                    **s_att_metrics,
+                )
+            )
+            overall_planned_h += s_planned_h
+            overall_total_h += s_total_h
+            overall_attended_h += s_attended_h
+            overall_absent_h += s_absent_h
+            overall_justified_h += s_justified_h
+
+        if view_360_row is not None and overall_total_h == 0:
+            overall_total_h = int(view_360_row.get("total_lesson_hours") or 0)
+            overall_attended_h = int(view_360_row.get("attended_hours") or 0)
+            overall_absent_h = int(view_360_row.get("absent_hours") or 0)
+
+        overall_att_metrics = compute_attendance_margin_metrics(
+            total_hours=overall_total_h,
+            attended_hours=overall_attended_h,
+            absent_hours=overall_absent_h,
+            planned_hours=overall_planned_h,
+        )
+        if overview is not None and overall_total_h == 0:
+            resolved_att_pct = overview.attendance_percentage
+        else:
+            resolved_att_pct = overall_att_metrics["attendance_percentage"]
+
+        critical_modules_count = sum(
+            1 for m_item in attendance_by_module if m_item.is_critical
+        )
+        attendance_summary = StudentPortalAttendanceSummarySchema(
+            planned_hours=overall_planned_h,
+            total_hours=overall_total_h,
+            attended_hours=overall_attended_h,
+            absent_hours=overall_absent_h,
+            justified_absent_hours=overall_justified_h,
+            attendance_percentage=resolved_att_pct,
+            min_required_percentage=overall_att_metrics["min_required_percentage"],
+            max_allowed_absent_hours=overall_att_metrics["max_allowed_absent_hours"],
+            remaining_absent_hours_margin=overall_att_metrics[
+                "remaining_absent_hours_margin"
+            ],
+            planned_max_allowed_absent_hours=overall_att_metrics[
+                "planned_max_allowed_absent_hours"
+            ],
+            planned_remaining_absent_hours_margin=overall_att_metrics[
+                "planned_remaining_absent_hours_margin"
+            ],
+            percentage_margin_to_limit=overall_att_metrics[
+                "percentage_margin_to_limit"
+            ],
+            is_critical=overall_att_metrics["is_critical"],
+            is_attendance_critical=overall_att_metrics["is_attendance_critical"],
+            risk_level=overall_att_metrics["risk_level"],
+            critical_modules_count=critical_modules_count,
+            by_subject=subject_attendance_list,
+            by_module=attendance_by_module,
+        )
+
+        # 4. Contadores de atividades práticas e agrupamento por módulo
+        pending_count = 0
+        late_count = 0
+        submitted_count = 0
+        evaluated_count = 0
+        mod_task_scores: dict[UUID, list[Decimal]] = {}
+        # Por módulo: [total, completed, pending, late, submitted, evaluated]
+        mod_task_counters: dict[UUID, list[int]] = {}
+        practical_submissions_schemas: list[StudentPendingTaskItemSchema] = []
+        upcoming_tasks_schemas: list[StudentPendingTaskItemSchema] = []
+
+        for sub in detailed_submissions:
+            eff_status = PracticalTaskService.resolve_effective_submission_status(
+                sub,
+                due_date=sub.task.due_date,
+                reference_now=now,
+            )
+            mod_id = sub.task.module_id
+            m_cnt = mod_task_counters.setdefault(mod_id, [0, 0, 0, 0, 0, 0])
+            m_cnt[0] += 1
+
+            if eff_status == SubmissionStatus.PENDING:
+                pending_count += 1
+                m_cnt[2] += 1
+            elif eff_status == SubmissionStatus.LATE:
+                late_count += 1
+                m_cnt[3] += 1
+            elif eff_status == SubmissionStatus.SUBMITTED:
+                submitted_count += 1
+                m_cnt[1] += 1
+                m_cnt[4] += 1
+            elif eff_status == SubmissionStatus.EVALUATED:
+                evaluated_count += 1
+                m_cnt[1] += 1
+                m_cnt[5] += 1
+
+            task_item = PracticalTaskService._to_student_pending_task_item(
+                sub,
+                effective_status=eff_status,
+            )
+            practical_submissions_schemas.append(task_item)
+            if eff_status in (SubmissionStatus.PENDING, SubmissionStatus.LATE):
+                upcoming_tasks_schemas.append(task_item)
+
+            if sub.final_task_score is not None:
+                mod_task_scores.setdefault(mod_id, []).append(
+                    Decimal(sub.final_task_score)
+                )
+
+        completed_count = submitted_count + evaluated_count
+        total_tasks_count = pending_count + late_count + completed_count
+        task_counts = StudentTaskCountsSummarySchema(
+            pending_count=pending_count,
+            late_count=late_count,
+            completed_count=completed_count,
+            submitted_count=submitted_count,
+            evaluated_count=evaluated_count,
+            total_count=total_tasks_count,
+        )
+
+        # 5. Notas formativas por módulo e disciplina
+        mod_grades: dict[UUID, list[tuple[Decimal, Decimal]]] = {}
+        subj_unlinked_grades: dict[UUID, list[tuple[Decimal, Decimal]]] = {}
+        for assessment in assessments:
+            w = Decimal(assessment.weight)
+            for grade in assessment.grades:
+                if grade.student_id != student.id:
+                    continue
+                eff, _ = compute_senai_effective_grade(
+                    grade.grade_value,
+                    grade.recovery_grade,
+                )
+                if assessment.module_id is not None:
+                    mod_grades.setdefault(assessment.module_id, []).append((eff, w))
+                else:
+                    subj_unlinked_grades.setdefault(assessment.subject_id, []).append(
+                        (eff, w)
+                    )
+
+        # 6. Médias por disciplina, progresso percentual por módulo e alvos de competências
+        subjects_report: list[StudentSubjectAverageSchema] = []
+        modules_progress: list[StudentModuleProgressItemSchema] = []
+        competency_targets: dict[UUID, tuple[str, str, Any, int]] = {}
+
+        for subj in subjects:
+            ordered_mods = sorted(
+                subj.learning_modules,
+                key=lambda m: (m.order_index, m.title.lower(), str(m.id)),
+            )
+            mod_reports: list[StudentModuleAverageSchema] = []
+            subj_w_sum = Decimal("0.00")
+            subj_w_den = Decimal("0.00")
+            subj_passings: list[Decimal] = []
+
+            for mod in ordered_mods:
+                for mc in mod.module_competencies:
+                    prev = competency_targets.get(mc.competency_id)
+                    req_lvl = (
+                        max(prev[3], mc.required_level)
+                        if prev is not None
+                        else mc.required_level
+                    )
+                    competency_targets[mc.competency_id] = (
+                        mc.competency.code,
+                        mc.competency.title,
+                        mc.competency.category,
+                        req_lvl,
+                    )
+
+                mod_passing = _q2(Decimal(mod.passing_score))
+                mod_weight = _q2(Decimal(mod.module_weight))
+                subj_passings.append(mod_passing)
+
+                g_entries = mod_grades.get(mod.id, [])
+                t_scores = mod_task_scores.get(mod.id, [])
+
+                a_num = sum((val * w for val, w in g_entries), Decimal("0.00"))
+                a_den = sum((w for _, w in g_entries), Decimal("0.00"))
+                a_avg = _q2(a_num / a_den) if a_den > Decimal("0.00") else None
+
+                t_num = sum(
+                    (val * _PRACTICAL_TASK_WEIGHT for val in t_scores),
+                    Decimal("0.00"),
+                )
+                t_den = Decimal(len(t_scores)) * _PRACTICAL_TASK_WEIGHT
+                t_avg = _q2(t_num / t_den) if t_den > Decimal("0.00") else None
+
+                c_den = a_den + t_den
+                m_avg = (
+                    _q2((a_num + t_num) / c_den) if c_den > Decimal("0.00") else None
+                )
+
+                mod_att_obj = att_item_by_module_id.get(mod.id)
+                mod_att_pct = (
+                    mod_att_obj.attendance_percentage
+                    if mod_att_obj is not None
+                    else resolved_att_pct
+                )
+
+                m_status, _, m_below = classify_academic_standing(
+                    m_avg,
+                    passing_score=mod_passing,
+                    attendance_rate=mod_att_pct,
+                )
+                mod_reports.append(
+                    StudentModuleAverageSchema(
+                        module_id=mod.id,
+                        subject_id=subj.id,
+                        module_title=mod.title,
+                        order_index=mod.order_index,
+                        module_weight=mod_weight,
+                        passing_score=mod_passing,
+                        assessments_count=len(g_entries),
+                        practical_tasks_count=len(t_scores),
+                        assessments_average=a_avg,
+                        practical_tasks_average=t_avg,
+                        module_average=m_avg,
+                        is_below_passing_score=m_below,
+                        status=m_status,
+                    )
+                )
+                if m_avg is not None:
+                    subj_w_sum += m_avg * mod_weight
+                    subj_w_den += mod_weight
+
+                m_tot, m_comp, m_pend, m_late, m_sub, m_eval = mod_task_counters.get(
+                    mod.id,
+                    [0, 0, 0, 0, 0, 0],
+                )
+                if m_tot > 0:
+                    mod_prog_pct = _q2(
+                        (Decimal(m_comp) * Decimal("100")) / Decimal(m_tot)
+                    )
+                elif m_avg is not None:
+                    mod_prog_pct = Decimal("100.00")
+                else:
+                    mod_prog_pct = Decimal("0.00")
+
+                modules_progress.append(
+                    StudentModuleProgressItemSchema(
+                        module_id=mod.id,
+                        subject_id=subj.id,
+                        subject_code=subj.code,
+                        subject_name=subj.name,
+                        module_title=mod.title,
+                        order_index=mod.order_index,
+                        practical_hours=mod.practical_hours,
+                        module_weight=mod_weight,
+                        passing_score=mod_passing,
+                        total_tasks_count=m_tot,
+                        completed_tasks_count=m_comp,
+                        pending_tasks_count=m_pend,
+                        late_tasks_count=m_late,
+                        submitted_tasks_count=m_sub,
+                        evaluated_tasks_count=m_eval,
+                        progress_percentage=mod_prog_pct,
+                        completion_percentage=mod_prog_pct,
+                        attendance_percentage=mod_att_pct,
+                        assessments_count=len(g_entries),
+                        assessments_average=a_avg,
+                        practical_tasks_average=t_avg,
+                        module_average=m_avg,
+                        is_below_passing_score=m_below,
+                        is_completed=(mod_prog_pct >= Decimal("100.00")),
+                        status=m_status,
+                    )
+                )
+
+            for eff, w in subj_unlinked_grades.get(subj.id, []):
+                subj_w_sum += eff * w
+                subj_w_den += w
+
+            s_passing = (
+                _q2(
+                    sum(subj_passings, Decimal("0.00")) / Decimal(len(subj_passings))
+                )
+                if subj_passings
+                else _DEFAULT_PASSING_SCORE
+            )
+            s_avg = (
+                _q2(subj_w_sum / subj_w_den) if subj_w_den > Decimal("0.00") else None
+            )
+            s_status, _, s_below = classify_academic_standing(
+                s_avg,
+                passing_score=s_passing,
+                attendance_rate=resolved_att_pct,
+            )
+            subjects_report.append(
+                StudentSubjectAverageSchema(
+                    subject_id=subj.id,
+                    subject_code=subj.code,
+                    subject_name=subj.name,
+                    passing_score=s_passing,
+                    subject_average=s_avg,
+                    is_below_passing_score=s_below,
+                    status=s_status,
+                    modules=mod_reports,
+                )
+            )
+
+        # 7. Evolução de nível por competência técnica para Gráfico Radar (FE-038)
+        ev_by_comp: dict[UUID, list[Decimal]] = {}
+        for ev in skill_evidences:
+            ev_by_comp.setdefault(ev.competency_id, []).append(
+                Decimal(ev.verified_level)
+            )
+            if ev.competency_id not in competency_targets:
+                competency_targets[ev.competency_id] = (
+                    ev.competency.code,
+                    ev.competency.title,
+                    ev.competency.category,
+                    3,
+                )
+
+        competencies_radar: list[StudentCompetencyRadarItemSchema] = []
+        for comp_id, (c_code, c_title, c_cat, req_lvl) in sorted(
+            competency_targets.items(),
+            key=lambda kv: kv[1][0],
+        ):
+            ev_vals = ev_by_comp.get(comp_id, [])
+            ver_lvl = (
+                _q2(sum(ev_vals, Decimal("0.00")) / Decimal(len(ev_vals)))
+                if ev_vals
+                else None
+            )
+            competencies_radar.append(
+                StudentCompetencyRadarItemSchema(
+                    competency_id=comp_id,
+                    code=c_code,
+                    title=c_title,
+                    category=c_cat,
+                    required_level=req_lvl,
+                    verified_level=ver_lvl,
+                    evidences_count=len(ev_vals),
+                    is_proficient=(
+                        ver_lvl is not None and ver_lvl >= Decimal(req_lvl)
+                    ),
+                )
+            )
+
+        # 8. Linha do tempo acadêmica (student_milestone_history - DB-039 / FE-039)
+        timeline_items: list[StudentMilestoneTimelineItemSchema] = []
+        for ms in milestones_orm:
+            ms_mod = ms.module
+            ms_subj = ms_mod.subject if ms_mod is not None else None
+            timeline_items.append(
+                StudentMilestoneTimelineItemSchema(
+                    id=ms.id,
+                    student_id=ms.student_id,
+                    enrollment_id=ms.enrollment_id,
+                    module_id=ms.module_id,
+                    module_title=ms_mod.title if ms_mod is not None else None,
+                    subject_id=ms_subj.id if ms_subj is not None else None,
+                    subject_code=ms_subj.code if ms_subj is not None else None,
+                    subject_name=ms_subj.name if ms_subj is not None else None,
+                    milestone_type=ms.milestone_type,
+                    title=ms.title,
+                    description=ms.description,
+                    metadata=ms.milestone_metadata,
+                    achieved_at=ms.achieved_at,
+                )
+            )
+
+        if total_tasks_count > 0:
+            overall_progress_pct = _q2(
+                (Decimal(completed_count) * Decimal("100")) / Decimal(total_tasks_count)
+            )
+        elif modules_progress:
+            overall_progress_pct = _q2(
+                sum(
+                    (m.progress_percentage for m in modules_progress),
+                    Decimal("0.00"),
+                )
+                / Decimal(len(modules_progress))
+            )
+        else:
+            overall_progress_pct = Decimal("0.00")
+
+        valid_subject_averages = [
+            s.subject_average
+            for s in subjects_report
+            if s.subject_average is not None
+        ]
+        if valid_subject_averages:
+            overall_average: Decimal | None = _q2(
+                sum(valid_subject_averages, Decimal("0.00"))
+                / Decimal(len(valid_subject_averages))
+            )
+        else:
+            overall_average = (
+                overview.overall_average
+                if overview is not None
+                else primary_enrollment.final_grade
+            )
+        standing_status, computed_risk, _ = classify_academic_standing(
+            overall_average,
+            passing_score=_DEFAULT_PASSING_SCORE,
+            attendance_rate=resolved_att_pct,
+        )
+        risk_rank = {
+            RiskLevel.LOW: 1,
+            RiskLevel.MODERATE: 2,
+            RiskLevel.HIGH: 3,
+            RiskLevel.CRITICAL: 4,
+        }
+        view_risk = overview.risk_level if overview is not None else RiskLevel.LOW
+        risk_level = (
+            view_risk
+            if risk_rank[view_risk] >= risk_rank[computed_risk]
+            else computed_risk
+        )
+
+        return StudentPortalDashboardResponseSchema(
+            student_id=student.id,
+            student=student_profile,
+            enrollment_id=primary_enrollment.id,
+            class_id=academic_class.id,
+            enrollment_status=primary_enrollment.status,
+            academic_class=EnrollmentClassSummarySchema.model_validate(academic_class),
+            course_code=course.code if course is not None else None,
+            course_name=course.name if course is not None else None,
+            generated_at=now,
+            overall_average=overall_average,
+            overall_progress_percentage=overall_progress_pct,
+            attendance_percentage=resolved_att_pct,
+            standing_status=standing_status,
+            risk_level=risk_level,
+            overview=overview,
+            attendance_summary=attendance_summary,
+            subjects=subjects_report,
+            attendance_by_module=attendance_by_module,
+            modules_progress=modules_progress,
+            competencies=competencies_radar,
+            competencies_radar=competencies_radar,
+            task_counts=task_counts,
+            activity_counters=task_counts,
+            upcoming_tasks=upcoming_tasks_schemas,
+            practical_submissions=practical_submissions_schemas,
+            timeline=timeline_items,
+            milestone_history=timeline_items,
         )
 
 

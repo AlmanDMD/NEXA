@@ -10,6 +10,8 @@ from app.schemas.base import UUIDPathParam
 from app.schemas.dashboard import (
     Student360OverviewResponseSchema,
     Student360ParamsDep,
+    StudentPortalDashboardParamsDep,
+    StudentPortalDashboardResponseSchema,
     TeacherClassDashboardParamsDep,
     TeacherClassDashboardResponseSchema,
 )
@@ -111,6 +113,27 @@ async def list_at_risk_students(
 ) -> AtRiskStudentsPaginatedResponseSchema:
     """Retorna alertas ativos paginados, filtráveis e ordenados por severidade (CRITICAL -> LOW)."""
     return risk_engine_service.list_at_risk_students(
+        params,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/dashboard/student/me",
+    response_model=StudentPortalDashboardResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar Portal de Autonomia do Aluno com progresso, notas, frequência, radar e linha do tempo",
+)
+async def get_student_portal_dashboard_me(
+    params: StudentPortalDashboardParamsDep,
+    dashboard_service: DashboardServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.STUDENT)),
+    ],
+) -> StudentPortalDashboardResponseSchema:
+    """Retorna informações privadas exclusivas do próprio estudante autenticado (current_user.id)."""
+    return dashboard_service.get_student_portal_dashboard(
         params,
         current_user=current_user,
     )
