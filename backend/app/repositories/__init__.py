@@ -65,6 +65,11 @@ from app.repositories.learning_module_repository import (
     LearningModuleRepositoryDep,
     get_learning_module_repository,
 )
+from app.repositories.pedagogical_note_repository import (
+    PedagogicalNoteRepository,
+    PedagogicalNoteRepositoryDep,
+    get_pedagogical_note_repository,
+)
 from app.repositories.practical_task_repository import (
     PracticalTaskRepository,
     PracticalTaskRepositoryDep,
@@ -118,6 +123,8 @@ __all__ = [
     "HelpRequestRepositoryDep",
     "LearningModuleRepository",
     "LearningModuleRepositoryDep",
+    "PedagogicalNoteRepository",
+    "PedagogicalNoteRepositoryDep",
     "PracticalTaskRepository",
     "PracticalTaskRepositoryDep",
     "RiskEngineRepository",
@@ -141,6 +148,7 @@ __all__ = [
     "get_enrollment_repository",
     "get_help_request_repository",
     "get_learning_module_repository",
+    "get_pedagogical_note_repository",
     "get_practical_task_repository",
     "get_risk_engine_repository",
     "get_self_assessment_repository",
