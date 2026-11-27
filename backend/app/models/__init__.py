@@ -27,6 +27,7 @@ from app.models.enrollment import Enrollment
 from app.models.help_request import ChatMessage, HelpRequest
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
+from app.models.pedagogical_note import PedagogicalNote
 from app.models.practical_task import (
     PracticalTask,
     SkillEvidence,
@@ -66,6 +67,7 @@ __all__ = [
     "HelpRequest",
     "LearningModule",
     "ModuleCompetency",
+    "PedagogicalNote",
     "PracticalTask",
     "SelfAssessmentForm",
     "SkillEvidence",

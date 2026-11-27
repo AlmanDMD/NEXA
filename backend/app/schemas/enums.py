@@ -149,6 +149,23 @@ class HelpRequestStatus(StrEnum):
     CLOSED = "CLOSED"
 
 
+class NoteVisibilityScope(StrEnum):
+    """Escopo estrito de visibilidade de observações pedagógicas — 'note_visibility_scope_enum' (DB-043)."""
+
+    PRIVATE_AUTHOR = "PRIVATE_AUTHOR"
+    TEACHERS_AND_COORD = "TEACHERS_AND_COORD"
+    COORDINATION_ONLY = "COORDINATION_ONLY"
+
+
+class NoteCategory(StrEnum):
+    """Natureza da observação pedagógica restrita — 'note_category_enum' (DB-043)."""
+
+    INTERVENTION = "INTERVENTION"
+    MENTORING = "MENTORING"
+    BEHAVIORAL = "BEHAVIORAL"
+    ACCOMMODATION = "ACCOMMODATION"
+
+
 __all__ = [
     "AcademicStandingStatus",
     "AlertCategory",
@@ -163,6 +180,8 @@ __all__ = [
     "HelpRequestCategory",
     "HelpRequestStatus",
     "MilestoneType",
+    "NoteCategory",
+    "NoteVisibilityScope",
     "RiskLevel",
     "Shift",
     "SubmissionStatus",

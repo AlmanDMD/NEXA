@@ -21,6 +21,7 @@ from app.routers.health import router as health_router
 from app.routers.help_requests import router as help_requests_router
 from app.routers.learning_modules import router as learning_modules_router
 from app.routers.lessons import router as lessons_router
+from app.routers.pedagogical_notes import router as pedagogical_notes_router
 from app.routers.practical_tasks import router as practical_tasks_router
 from app.routers.self_assessments import router as self_assessments_router
 from app.routers.subjects import router as subjects_router
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     application.include_router(teacher_assignments_router)
     application.include_router(announcements_router)
     application.include_router(help_requests_router)
+    application.include_router(pedagogical_notes_router)
 
     return application
 

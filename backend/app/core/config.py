@@ -42,6 +42,10 @@ class Settings(BaseSettings):
         default="nexa-dev-jwt-refresh-secret-key-min-32-bytes-2026",
         min_length=16,
     )
+    PEDAGOGICAL_NOTE_ENCRYPTION_KEY: str = Field(
+        default="nexa-dev-pedagogical-notes-encryption-secret-key-aes256-2026",
+        min_length=16,
+    )
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, ge=1)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1)
