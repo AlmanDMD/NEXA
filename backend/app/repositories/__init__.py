@@ -20,6 +20,11 @@ from app.repositories.auth_repository import (
     AuthRepositoryDep,
     get_auth_repository,
 )
+from app.repositories.class_announcement_repository import (
+    ClassAnnouncementRepository,
+    ClassAnnouncementRepositoryDep,
+    get_class_announcement_repository,
+)
 from app.repositories.class_lesson_repository import (
     ClassLessonRepository,
     ClassLessonRepositoryDep,
@@ -90,6 +95,8 @@ __all__ = [
     "AuditRepositoryDep",
     "AuthRepository",
     "AuthRepositoryDep",
+    "ClassAnnouncementRepository",
+    "ClassAnnouncementRepositoryDep",
     "ClassLessonRepository",
     "ClassLessonRepositoryDep",
     "CompetencyRepository",
@@ -118,6 +125,7 @@ __all__ = [
     "get_academic_class_repository",
     "get_audit_repository",
     "get_auth_repository",
+    "get_class_announcement_repository",
     "get_class_lesson_repository",
     "get_competency_repository",
     "get_course_repository",

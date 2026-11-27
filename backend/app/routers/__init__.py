@@ -1,5 +1,6 @@
 """Camada de routers (controladores HTTP e definição de rotas)."""
 
+from app.routers.announcements import router as announcements_router
 from app.routers.assessments import router as assessments_router
 from app.routers.auth import router as auth_router
 from app.routers.classes import router as classes_router
@@ -16,6 +17,7 @@ from app.routers.subjects import router as subjects_router
 from app.routers.teacher_assignments import router as teacher_assignments_router
 
 __all__ = [
+    "announcements_router",
     "assessments_router",
     "auth_router",
     "classes_router",

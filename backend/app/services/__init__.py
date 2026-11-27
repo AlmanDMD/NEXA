@@ -49,6 +49,19 @@ from app.services.auth_service import (
     REFRESH_TOKEN_REVOKED_REUSE_MESSAGE,
     get_auth_service,
 )
+from app.services.class_announcement_service import (
+    ANNOUNCEMENT_CLASS_NOT_FOUND_MESSAGE,
+    ANNOUNCEMENT_INVALID_EXPIRATION_MESSAGE,
+    ANNOUNCEMENT_NOT_FOUND_MESSAGE,
+    ANNOUNCEMENT_SUBJECT_COURSE_MISMATCH_MESSAGE,
+    ANNOUNCEMENT_SUBJECT_NOT_FOUND_MESSAGE,
+    ANNOUNCEMENT_TEACHER_AUTHOR_FORBIDDEN_MESSAGE,
+    ANNOUNCEMENT_TEACHER_CLASS_FORBIDDEN_MESSAGE,
+    ANNOUNCEMENT_TEACHER_SUBJECT_FORBIDDEN_MESSAGE,
+    ClassAnnouncementService,
+    ClassAnnouncementServiceDep,
+    get_class_announcement_service,
+)
 from app.services.class_lesson_service import (
     ATTENDANCE_ABSENT_HOURS_EXCEED_WORKLOAD_MESSAGE,
     ATTENDANCE_CRITICAL_THRESHOLD,
@@ -242,6 +255,14 @@ from app.services.teacher_assignment_service import (
 
 __all__ = [
     "ALIGNED_STRICT_THRESHOLD",
+    "ANNOUNCEMENT_CLASS_NOT_FOUND_MESSAGE",
+    "ANNOUNCEMENT_INVALID_EXPIRATION_MESSAGE",
+    "ANNOUNCEMENT_NOT_FOUND_MESSAGE",
+    "ANNOUNCEMENT_SUBJECT_COURSE_MISMATCH_MESSAGE",
+    "ANNOUNCEMENT_SUBJECT_NOT_FOUND_MESSAGE",
+    "ANNOUNCEMENT_TEACHER_AUTHOR_FORBIDDEN_MESSAGE",
+    "ANNOUNCEMENT_TEACHER_CLASS_FORBIDDEN_MESSAGE",
+    "ANNOUNCEMENT_TEACHER_SUBJECT_FORBIDDEN_MESSAGE",
     "ASSESSMENT_CLASS_NOT_FOUND_MESSAGE",
     "ASSESSMENT_INACTIVE_CLASS_MESSAGE",
     "ASSESSMENT_INACTIVE_SUBJECT_MESSAGE",
@@ -282,6 +303,8 @@ __all__ = [
     "COURSE_CODE_CONFLICT_MESSAGE",
     "COURSE_DEACTIVATION_ACTIVE_CLASSES_MESSAGE",
     "COURSE_NOT_FOUND_MESSAGE",
+    "ClassAnnouncementService",
+    "ClassAnnouncementServiceDep",
     "ClassLessonService",
     "ClassLessonServiceDep",
     "CompetencyDiagnosticEvaluationResult",
@@ -431,6 +454,7 @@ __all__ = [
     "get_academic_class_service",
     "get_audit_service",
     "get_auth_service",
+    "get_class_announcement_service",
     "get_class_lesson_service",
     "get_competency_service",
     "get_course_service",
