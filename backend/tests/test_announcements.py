@@ -24,6 +24,7 @@ from app.main import create_app
 from app.models import (
     Base,
     ClassAnnouncement,
+    Enrollment,
     TeacherAssignment,
     User,
 )
@@ -33,11 +34,13 @@ from app.repositories.course_repository import CourseRepository
 from app.repositories.subject_repository import SubjectRepository
 from app.schemas.class_announcement import (
     ClassAnnouncementCreateSchema,
+    ClassAnnouncementListQueryParams,
     ClassAnnouncementUpdateSchema,
 )
 from app.schemas.enums import (
     AnnouncementPriority,
     ClassStatus,
+    EnrollmentStatus,
     Shift,
     UserRole,
 )
@@ -46,6 +49,7 @@ from app.services.class_announcement_service import (
     ANNOUNCEMENT_CLASS_NOT_FOUND_MESSAGE,
     ANNOUNCEMENT_INVALID_EXPIRATION_MESSAGE,
     ANNOUNCEMENT_NOT_FOUND_MESSAGE,
+    ANNOUNCEMENT_STUDENT_CLASS_FORBIDDEN_MESSAGE,
     ANNOUNCEMENT_SUBJECT_COURSE_MISMATCH_MESSAGE,
     ANNOUNCEMENT_SUBJECT_NOT_FOUND_MESSAGE,
     ANNOUNCEMENT_TEACHER_AUTHOR_FORBIDDEN_MESSAGE,
@@ -266,6 +270,31 @@ class TestClassAnnouncementUnitValidations:
                 published_at=now,
                 expires_at=now - timedelta(minutes=5),
             )
+
+    def test_list_query_params_validation(self) -> None:
+        """Valida unitariamente filtros e paginação de GET /api/v1/announcements (BE-042)."""
+        params = ClassAnnouncementListQueryParams(
+            page=2,
+            limit=50,
+            class_id=uuid4(),
+            subject_id=uuid4(),
+            priority="important",  # type: ignore[arg-type]
+        )
+        assert params.page == 2
+        assert params.limit == 50
+        assert params.priority == AnnouncementPriority.IMPORTANT
+
+        empty_prio = ClassAnnouncementListQueryParams(priority="   ")  # type: ignore[arg-type]
+        assert empty_prio.priority is None
+
+        with pytest.raises(ValidationError):
+            ClassAnnouncementListQueryParams(page=0)
+
+        with pytest.raises(ValidationError):
+            ClassAnnouncementListQueryParams(limit=101)
+
+        with pytest.raises(ValidationError):
+            ClassAnnouncementListQueryParams(priority="INVALID")  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -653,3 +682,326 @@ async def test_announcements_crud_priorities_pinning_and_rbac_flow(
     with db_session_factory() as session:
         assert session.get(ClassAnnouncement, ann_id) is None
         assert session.get(ClassAnnouncement, coord_ann_id) is None
+
+
+@pytest.mark.asyncio
+async def test_list_announcements_feed_ordering_expiration_filters_and_isolation(
+    client: AsyncClient,
+    db_session_factory: sessionmaker[Session],
+    fast_hasher: PasswordHasher,
+) -> None:
+    """Valida GET /api/v1/announcements: is_pinned/published_at DESC, filtro de expirados, filtros, paginação e isolamento por turma (BE-042)."""
+    teacher_a, teacher_a_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="prof.a042@senai.br",
+        role=UserRole.TEACHER,
+        full_name="Prof. Turma A 042",
+        registration_number="PROF-042-A",
+    )
+    teacher_no_class, teacher_no_class_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="prof.semturma042@senai.br",
+        role=UserRole.TEACHER,
+        full_name="Prof. Sem Turma 042",
+        registration_number="PROF-042-N",
+    )
+    coord, coord_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="coord042@senai.br",
+        role=UserRole.COORDINATOR,
+        full_name="Coord 042",
+        registration_number="COORD-042",
+    )
+    student_a, student_a_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="aluno.a042@senai.br",
+        role=UserRole.STUDENT,
+        full_name="Aluno Turma A",
+        registration_number="ALU-042-A",
+    )
+    student_b, student_b_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="aluno.b042@senai.br",
+        role=UserRole.STUDENT,
+        full_name="Aluno Turma B",
+        registration_number="ALU-042-B",
+    )
+    _student_unassigned, student_unassigned_token = _seed_user_with_token(
+        db_session_factory,
+        fast_hasher,
+        email="aluno.semmat042@senai.br",
+        role=UserRole.STUDENT,
+        full_name="Aluno Sem Matrícula",
+        registration_number="ALU-042-N",
+    )
+
+    now = datetime.now(timezone.utc)
+
+    with db_session_factory() as session:
+        course = CourseRepository(session).create(
+            code="TEC-MEC-042",
+            name="Técnico em Mecânica Industrial",
+            description="Curso Técnico SENAI",
+            total_hours=1200,
+            is_active=True,
+        )
+        class_a = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2026-042A",
+            period="2026.1",
+            shift=Shift.MORNING,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        class_b = AcademicClassRepository(session).create(
+            course_id=course.id,
+            code="MEC-2026-042B",
+            period="2026.1",
+            shift=Shift.NIGHT,
+            max_students=30,
+            status=ClassStatus.ACTIVE,
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 12, 31),
+        )
+        subj_met = SubjectRepository(session).create(
+            course_id=course.id,
+            code="MET-042",
+            name="Metrologia",
+            workload_hours=60,
+            is_active=True,
+        )
+        subj_tor = SubjectRepository(session).create(
+            course_id=course.id,
+            code="TOR-042",
+            name="Tornearia",
+            workload_hours=80,
+            is_active=True,
+        )
+        session.add_all(
+            [
+                TeacherAssignment(
+                    teacher_id=teacher_a.id,
+                    class_id=class_a.id,
+                    subject_id=subj_met.id,
+                    is_main_teacher=True,
+                ),
+                Enrollment(
+                    student_id=student_a.id,
+                    class_id=class_a.id,
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+                Enrollment(
+                    student_id=student_b.id,
+                    class_id=class_b.id,
+                    status=EnrollmentStatus.ACTIVE,
+                ),
+            ]
+        )
+
+        # Avisos na Turma A:
+        # 1. Fixado mais recente (deve ser o 1º)
+        ann_pinned_new = ClassAnnouncement(
+            class_id=class_a.id,
+            subject_id=subj_met.id,
+            author_id=teacher_a.id,
+            title="Fixado Recente Metrologia",
+            content="Aviso fixado mais recente da disciplina de Metrologia.",
+            priority=AnnouncementPriority.URGENT,
+            is_pinned=True,
+            published_at=now - timedelta(hours=2),
+            expires_at=now + timedelta(days=5),
+        )
+        # 2. Fixado mais antigo (deve ser o 2º)
+        ann_pinned_old = ClassAnnouncement(
+            class_id=class_a.id,
+            subject_id=None,
+            author_id=coord.id,
+            title="Fixado Antigo Turma A",
+            content="Aviso institucional fixado anteriormente pela coordenação.",
+            priority=AnnouncementPriority.IMPORTANT,
+            is_pinned=True,
+            published_at=now - timedelta(days=3),
+            expires_at=None,
+        )
+        # 3. Não fixado recente (deve ser o 3º)
+        ann_regular_new = ClassAnnouncement(
+            class_id=class_a.id,
+            subject_id=subj_tor.id,
+            author_id=coord.id,
+            title="Regular Recente Tornearia",
+            content="Aviso regular recente sobre tornearia mecânica.",
+            priority=AnnouncementPriority.IMPORTANT,
+            is_pinned=False,
+            published_at=now - timedelta(hours=1),
+            expires_at=now + timedelta(days=2),
+        )
+        # 4. Não fixado antigo (deve ser o 4º)
+        ann_regular_old = ClassAnnouncement(
+            class_id=class_a.id,
+            subject_id=subj_met.id,
+            author_id=teacher_a.id,
+            title="Regular Antigo Metrologia",
+            content="Aviso regular mais antigo da disciplina de Metrologia.",
+            priority=AnnouncementPriority.NORMAL,
+            is_pinned=False,
+            published_at=now - timedelta(days=2),
+            expires_at=None,
+        )
+        # 5. Aviso EXPIRADO na Turma A (NUNCA deve ser retornado!)
+        ann_expired = ClassAnnouncement(
+            class_id=class_a.id,
+            subject_id=subj_met.id,
+            author_id=teacher_a.id,
+            title="Aviso Expirado Turma A",
+            content="Este aviso já expirou e deve ser ocultado automaticamente.",
+            priority=AnnouncementPriority.URGENT,
+            is_pinned=True,
+            published_at=now - timedelta(days=5),
+            expires_at=now - timedelta(minutes=10),
+        )
+        # 6. Aviso da Turma B (não deve aparecer para Aluno A nem Prof A)
+        ann_class_b = ClassAnnouncement(
+            class_id=class_b.id,
+            subject_id=subj_tor.id,
+            author_id=coord.id,
+            title="Aviso Exclusivo Turma B",
+            content="Comunicado exclusivo para estudantes matriculados na Turma B.",
+            priority=AnnouncementPriority.NORMAL,
+            is_pinned=True,
+            published_at=now - timedelta(minutes=30),
+            expires_at=None,
+        )
+        session.add_all(
+            [
+                ann_pinned_new,
+                ann_pinned_old,
+                ann_regular_new,
+                ann_regular_old,
+                ann_expired,
+                ann_class_b,
+            ]
+        )
+        session.commit()
+
+    # 1. 401 sem autenticação
+    assert (await client.get("/api/v1/announcements")).status_code == status.HTTP_401_UNAUTHORIZED
+
+    stu_a_h = {"Authorization": f"Bearer {student_a_token}"}
+    stu_b_h = {"Authorization": f"Bearer {student_b_token}"}
+    stu_none_h = {"Authorization": f"Bearer {student_unassigned_token}"}
+    prof_a_h = {"Authorization": f"Bearer {teacher_a_token}"}
+    prof_none_h = {"Authorization": f"Bearer {teacher_no_class_token}"}
+    coord_h = {"Authorization": f"Bearer {coord_token}"}
+
+    # 2. Estudante A sem filtro de turma: vê apenas os 4 ativos da Turma A, ordenados por is_pinned DESC, published_at DESC
+    res_stu_a = await client.get("/api/v1/announcements", headers=stu_a_h)
+    assert res_stu_a.status_code == status.HTTP_200_OK
+    body_a = res_stu_a.json()
+    assert body_a["total"] == 4
+    assert body_a["total_pages"] == 1
+    assert [item["title"] for item in body_a["data"]] == [
+        "Fixado Recente Metrologia",
+        "Fixado Antigo Turma A",
+        "Regular Recente Tornearia",
+        "Regular Antigo Metrologia",
+    ]
+    assert "Aviso Expirado Turma A" not in res_stu_a.text
+    assert "Aviso Exclusivo Turma B" not in res_stu_a.text
+
+    # 3. Filtros por class_id, subject_id, priority e paginação
+    res_subj = await client.get(
+        f"/api/v1/announcements?class_id={class_a.id}&subject_id={subj_met.id}",
+        headers=stu_a_h,
+    )
+    assert res_subj.status_code == status.HTTP_200_OK
+    assert [i["title"] for i in res_subj.json()["data"]] == [
+        "Fixado Recente Metrologia",
+        "Regular Antigo Metrologia",
+    ]
+
+    res_prio = await client.get(
+        "/api/v1/announcements?priority=IMPORTANT",
+        headers=stu_a_h,
+    )
+    assert res_prio.status_code == status.HTTP_200_OK
+    assert [i["title"] for i in res_prio.json()["data"]] == [
+        "Fixado Antigo Turma A",
+        "Regular Recente Tornearia",
+    ]
+
+    res_page2 = await client.get(
+        "/api/v1/announcements?page=2&limit=2",
+        headers=stu_a_h,
+    )
+    assert res_page2.status_code == status.HTTP_200_OK
+    page2_body = res_page2.json()
+    assert page2_body["total"] == 4
+    assert page2_body["page"] == 2
+    assert page2_body["limit"] == 2
+    assert page2_body["total_pages"] == 2
+    assert [i["title"] for i in page2_body["data"]] == [
+        "Regular Recente Tornearia",
+        "Regular Antigo Metrologia",
+    ]
+
+    # 4. Isolamento estrito por turma: Estudante A tentando filtrar Turma B recebe 403 Forbidden
+    res_stu_a_forb = await client.get(
+        f"/api/v1/announcements?class_id={class_b.id}",
+        headers=stu_a_h,
+    )
+    assert res_stu_a_forb.status_code == status.HTTP_403_FORBIDDEN
+    assert res_stu_a_forb.json()["message"] == ANNOUNCEMENT_STUDENT_CLASS_FORBIDDEN_MESSAGE
+
+    # Estudante B vê apenas Turma B
+    res_stu_b = await client.get("/api/v1/announcements", headers=stu_b_h)
+    assert res_stu_b.status_code == status.HTTP_200_OK
+    assert [i["title"] for i in res_stu_b.json()["data"]] == ["Aviso Exclusivo Turma B"]
+
+    # Estudante sem matrícula: lista vazia sem class_id e 403 se filtrar turma alheia
+    res_stu_none = await client.get("/api/v1/announcements", headers=stu_none_h)
+    assert res_stu_none.status_code == status.HTTP_200_OK
+    assert res_stu_none.json() == {"data": [], "total": 0, "page": 1, "limit": 20, "total_pages": 0}
+    assert (
+        await client.get(f"/api/v1/announcements?class_id={class_a.id}", headers=stu_none_h)
+    ).status_code == status.HTTP_403_FORBIDDEN
+
+    # 5. Isolamento docente: Prof A vê apenas Turma A e recebe 403 para Turma B; Prof sem turmas recebe lista vazia
+    res_prof_a = await client.get("/api/v1/announcements", headers=prof_a_h)
+    assert res_prof_a.status_code == status.HTTP_200_OK
+    assert res_prof_a.json()["total"] == 4
+    res_prof_a_forb = await client.get(
+        f"/api/v1/announcements?class_id={class_b.id}",
+        headers=prof_a_h,
+    )
+    assert res_prof_a_forb.status_code == status.HTTP_403_FORBIDDEN
+    assert res_prof_a_forb.json()["message"] == ANNOUNCEMENT_TEACHER_CLASS_FORBIDDEN_MESSAGE
+
+    res_prof_none = await client.get("/api/v1/announcements", headers=prof_none_h)
+    assert res_prof_none.status_code == status.HTTP_200_OK
+    assert res_prof_none.json()["total"] == 0
+
+    # 6. Coordenação tem visão global das duas turmas (4 + 1 = 5 ativos)
+    res_coord = await client.get("/api/v1/announcements", headers=coord_h)
+    assert res_coord.status_code == status.HTTP_200_OK
+    assert res_coord.json()["total"] == 5
+
+    # 7. Validações 404 e 400
+    assert (
+        await client.get(f"/api/v1/announcements?class_id={uuid4()}", headers=coord_h)
+    ).status_code == status.HTTP_404_NOT_FOUND
+    assert (
+        await client.get(f"/api/v1/announcements?subject_id={uuid4()}", headers=coord_h)
+    ).status_code == status.HTTP_404_NOT_FOUND
+    assert (
+        await client.get("/api/v1/announcements?priority=UNKNOWN", headers=coord_h)
+    ).status_code == status.HTTP_400_BAD_REQUEST
+    assert (
+        await client.get("/api/v1/announcements?limit=101", headers=coord_h)
+    ).status_code == status.HTTP_400_BAD_REQUEST

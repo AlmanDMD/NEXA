@@ -1,20 +1,22 @@
-"""Repositório SQLAlchemy 2.0 para Publicação, Edição e Remoção de Avisos no Mural da Turma (BE-041)."""
+"""Repositório SQLAlchemy 2.0 para Publicação, Edição e Consulta de Avisos no Mural da Turma (BE-041 / BE-042)."""
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
 from app.models.class_announcement import ClassAnnouncement
+from app.models.enrollment import Enrollment
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
 from app.models.user import User
-from app.schemas.enums import AnnouncementPriority
+from app.schemas.enums import AnnouncementPriority, EnrollmentStatus
 
 
 class ClassAnnouncementRepository:
@@ -86,6 +88,76 @@ class ClassAnnouncementRepository:
             .limit(1)
         )
         return self._session.scalar(stmt) is not None
+
+    def list_student_enrolled_class_ids(self, student_id: UUID) -> set[UUID]:
+        """Retorna os UUIDs das turmas em que o estudante possui matrícula ativa."""
+        stmt = select(Enrollment.class_id).where(
+            Enrollment.student_id == student_id,
+            Enrollment.status == EnrollmentStatus.ACTIVE,
+        )
+        return set(self._session.scalars(stmt).all())
+
+    def list_teacher_assigned_class_ids(self, teacher_id: UUID) -> set[UUID]:
+        """Retorna os UUIDs das turmas em que o docente possui atribuição ativa."""
+        stmt = select(TeacherAssignment.class_id).where(
+            TeacherAssignment.teacher_id == teacher_id
+        )
+        return set(self._session.scalars(stmt).all())
+
+    def list_active_announcements(
+        self,
+        *,
+        now_utc: datetime,
+        page: int,
+        limit: int,
+        class_id: UUID | None = None,
+        allowed_class_ids: Sequence[UUID] | None = None,
+        subject_id: UUID | None = None,
+        priority: AnnouncementPriority | None = None,
+    ) -> tuple[list[ClassAnnouncement], int]:
+        """Consulta comunicados não expirados ordenados por is_pinned DESC e published_at DESC (DB-041 / BE-042)."""
+        stmt = select(ClassAnnouncement).where(
+            or_(
+                ClassAnnouncement.expires_at.is_(None),
+                ClassAnnouncement.expires_at >= now_utc,
+            )
+        )
+
+        if class_id is not None:
+            stmt = stmt.where(ClassAnnouncement.class_id == class_id)
+
+        if allowed_class_ids is not None:
+            allowed_list = list(dict.fromkeys(allowed_class_ids))
+            if not allowed_list:
+                return [], 0
+            stmt = stmt.where(ClassAnnouncement.class_id.in_(allowed_list))
+
+        if subject_id is not None:
+            stmt = stmt.where(ClassAnnouncement.subject_id == subject_id)
+
+        if priority is not None:
+            stmt = stmt.where(ClassAnnouncement.priority == priority)
+
+        total = int(
+            self._session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        )
+        offset = (page - 1) * limit
+        items_stmt = (
+            stmt.options(
+                joinedload(ClassAnnouncement.academic_class),
+                joinedload(ClassAnnouncement.subject),
+                joinedload(ClassAnnouncement.author).selectinload(User.profile),
+            )
+            .order_by(
+                ClassAnnouncement.is_pinned.desc(),
+                ClassAnnouncement.published_at.desc(),
+                ClassAnnouncement.id.asc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        items = list(self._session.scalars(items_stmt).unique().all())
+        return items, total
 
     def create(
         self,

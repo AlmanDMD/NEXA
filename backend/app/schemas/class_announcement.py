@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timezone
 from typing import Annotated, Any, Self
 from uuid import UUID
 
+from fastapi import Query
 from pydantic import BeforeValidator, Field, model_validator
 from pydantic_core import PydanticCustomError
 
@@ -62,6 +63,17 @@ def validate_announcement_priority_pt(value: Any) -> AnnouncementPriority:
         "announcement_priority_invalid",
         "A prioridade do aviso (priority) deve ser 'NORMAL', 'IMPORTANT' ou 'URGENT'.",
     )
+
+
+def validate_optional_announcement_priority_pt(
+    value: Any,
+) -> AnnouncementPriority | None:
+    """Valida filtro opcional de prioridade do aviso tratando string vazia como None."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return validate_announcement_priority_pt(value)
 
 
 def validate_announcement_expires_at_pt(value: Any) -> datetime | None:
@@ -266,6 +278,57 @@ class ClassAnnouncementResponseSchema(BaseResponseSchema):
     )
 
 
+class ClassAnnouncementListQueryParams(StrictRequestSchema):
+    """Parâmetros de paginação e filtros para GET /api/v1/announcements (BE-042)."""
+
+    page: int = Field(
+        default=1,
+        ge=1,
+        description="Número da página (iniciando em 1)",
+    )
+    limit: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Quantidade máxima de avisos por página (1 a 100)",
+    )
+    class_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da turma acadêmica",
+    )
+    subject_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional pelo UUID da disciplina técnica",
+    )
+    priority: Annotated[
+        AnnouncementPriority | None,
+        BeforeValidator(validate_optional_announcement_priority_pt),
+        Field(
+            default=None,
+            description="Filtro opcional pela prioridade visual do aviso (NORMAL, IMPORTANT, URGENT)",
+        ),
+    ] = None
+
+
+type ClassAnnouncementListParamsDep = Annotated[
+    ClassAnnouncementListQueryParams,
+    Query(),
+]
+
+
+class ClassAnnouncementPaginatedResponseSchema(BaseResponseSchema):
+    """Lista paginada de avisos do mural ordenada por is_pinned DESC e published_at DESC (BE-042)."""
+
+    data: list[ClassAnnouncementResponseSchema] = Field(
+        default_factory=list,
+        description="Lista de comunicados ativos ordenados por fixação e data de publicação",
+    )
+    total: int = Field(ge=0, description="Total de comunicados encontrados para os filtros")
+    page: int = Field(ge=1, description="Página atual")
+    limit: int = Field(ge=1, le=100, description="Limite máximo de itens por página")
+    total_pages: int = Field(ge=0, description="Quantidade total de páginas disponíveis")
+
+
 __all__ = [
     "AnnouncementAuthorSummarySchema",
     "AnnouncementContentStr",
@@ -273,6 +336,9 @@ __all__ = [
     "AnnouncementSubjectSummarySchema",
     "AnnouncementTitleStr",
     "ClassAnnouncementCreateSchema",
+    "ClassAnnouncementListParamsDep",
+    "ClassAnnouncementListQueryParams",
+    "ClassAnnouncementPaginatedResponseSchema",
     "ClassAnnouncementResponseSchema",
     "ClassAnnouncementUpdateSchema",
     "OptionalAnnouncementExpiresAtDatetime",
@@ -280,4 +346,5 @@ __all__ = [
     "validate_announcement_expires_at_pt",
     "validate_announcement_priority_pt",
     "validate_announcement_title_pt",
+    "validate_optional_announcement_priority_pt",
 ]
