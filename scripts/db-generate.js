@@ -28,6 +28,13 @@ function sha256(content) {
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
+function writeFileIfChanged(filePath, content) {
+  if (fs.existsSync(filePath) && fs.readFileSync(filePath, 'utf8') === content) {
+    return;
+  }
+  fs.writeFileSync(filePath, content, 'utf8');
+}
+
 function parsePrismaEnums(schemaContent) {
   const enumRegex = /enum\s+([A-Za-z0-9_]+)\s*\{([\s\S]*?)\}/g;
   const parsedEnums = [];
@@ -279,14 +286,13 @@ function main() {
   const enumMatches = [...sql3fnContent.matchAll(/CREATE\s+TYPE\s+([a-z0-9_]+)\s+AS\s+ENUM/gi)].map((m) => m[1]);
 
   fs.mkdirSync(TYPES_DIR, { recursive: true });
-  fs.writeFileSync(path.join(TYPES_DIR, 'system-enums.ts'), generateTypeScriptEnums(parsedEnums), 'utf8');
-  fs.writeFileSync(path.join(TYPES_DIR, 'system_enums.py'), generatePythonEnums(parsedEnums), 'utf8');
-  fs.writeFileSync(
+  writeFileIfChanged(path.join(TYPES_DIR, 'system-enums.ts'), generateTypeScriptEnums(parsedEnums));
+  writeFileIfChanged(path.join(TYPES_DIR, 'system_enums.py'), generatePythonEnums(parsedEnums));
+  writeFileIfChanged(
     path.join(TYPES_DIR, 'system-enums.json'),
-    JSON.stringify({ generatedAt: 'DB-005', enums: parsedEnums }, null, 2) + '\n',
-    'utf8'
+    JSON.stringify({ generatedAt: 'DB-005', enums: parsedEnums }, null, 2) + '\n'
   );
-  fs.writeFileSync(path.join(TYPES_DIR, 'schema-models.ts'), generateTypeScriptModels(parsedModels), 'utf8');
+  writeFileIfChanged(path.join(TYPES_DIR, 'schema-models.ts'), generateTypeScriptModels(parsedModels));
 
   const migrations = [];
   if (fs.existsSync(PRISMA_MIGRATIONS_DIR)) {
@@ -324,7 +330,7 @@ function main() {
   };
 
   fs.mkdirSync(path.dirname(MANIFEST_OUTPUT_PATH), { recursive: true });
-  fs.writeFileSync(MANIFEST_OUTPUT_PATH, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  writeFileIfChanged(MANIFEST_OUTPUT_PATH, JSON.stringify(manifest, null, 2) + '\n');
 
   console.log(`  [OK] Schema validado: prisma/schema.prisma (PostgreSQL + DATABASE_URL + @map/@@map)`);
   console.log(`  [OK] Enums extraídos e exportados (TS, Python, JSON): ${parsedEnums.length}`);

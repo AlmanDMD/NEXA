@@ -2,11 +2,11 @@
   "project": "NEXA — Sistema Inteligente de Monitoramento Acadêmico SENAI",
   "databaseEngine": "PostgreSQL 16 Alpine (Docker)",
   "namingConvention": "snake_case (Database) / camelCase (@map Application)",
-  "schemaSha256": "cac80f85e8b516e1012514190e9e680fdf5bbab70d4697139f3f826b6b35a3bb",
+  "schemaSha256": "b7eabed652e6dd53c5d7e9ecd1a0bcc9a59a4788734b50aa94784d4d337addbe",
   "logicalModel3fnSha256": "7eb0c74f5c3b302fe652d0f66316ab55a2aff5f151959b2b59da5a23ae3af793",
   "totalTables3fn": 33,
   "totalEnums": 18,
-  "totalPrismaModels": 23,
+  "totalPrismaModels": 33,
   "prismaModels": [
     {
       "name": "SchemaMigration",
@@ -122,6 +122,56 @@
       "name": "StudentSelfAssessment",
       "tableName": "student_self_assessments",
       "fieldCount": 8
+    },
+    {
+      "name": "SkillEvidence",
+      "tableName": "skill_evidences",
+      "fieldCount": 8
+    },
+    {
+      "name": "AcademicAlert",
+      "tableName": "academic_alerts",
+      "fieldCount": 13
+    },
+    {
+      "name": "ExplainableDiagnostic",
+      "tableName": "explainable_diagnostics",
+      "fieldCount": 13
+    },
+    {
+      "name": "StudentMilestoneHistory",
+      "tableName": "student_milestone_history",
+      "fieldCount": 9
+    },
+    {
+      "name": "ClassAnnouncement",
+      "tableName": "class_announcements",
+      "fieldCount": 10
+    },
+    {
+      "name": "HelpRequest",
+      "tableName": "help_requests",
+      "fieldCount": 15
+    },
+    {
+      "name": "PedagogicalNote",
+      "tableName": "pedagogical_notes",
+      "fieldCount": 11
+    },
+    {
+      "name": "ChatMessage",
+      "tableName": "chat_messages",
+      "fieldCount": 7
+    },
+    {
+      "name": "GamificationBadge",
+      "tableName": "gamification_badges",
+      "fieldCount": 10
+    },
+    {
+      "name": "StudentAchievement",
+      "tableName": "student_achievements",
+      "fieldCount": 6
     }
   ],
   "tables": [
@@ -484,6 +534,81 @@
       "id": "20261123100000_create_student_self_assessments_table",
       "checksumSha256": "e90790625ff9d2ae1f7fe9e1f8249bef101082b9730e8d828f50b52bbabbbb73",
       "path": "prisma/migrations/20261123100000_create_student_self_assessments_table/migration.sql"
+    },
+    {
+      "id": "20261126000000_create_skill_evidences_table",
+      "checksumSha256": "dfaa6711434c3fd0424af661ef728273a2c6137f0264e4450ede8a8ec3abe438",
+      "path": "prisma/migrations/20261126000000_create_skill_evidences_table/migration.sql"
+    },
+    {
+      "id": "20261126010000_create_academic_alerts_table",
+      "checksumSha256": "05673f691bdd63f0cfcd32339106f9f00da76c433b1b64327d60504be290e4cb",
+      "path": "prisma/migrations/20261126010000_create_academic_alerts_table/migration.sql"
+    },
+    {
+      "id": "20261126020000_create_explainable_diagnostics_table",
+      "checksumSha256": "61bb3209477bdccf1f4315c95ed72aaa12371121b8f9255f04373de1fe7b15a3",
+      "path": "prisma/migrations/20261126020000_create_explainable_diagnostics_table/migration.sql"
+    },
+    {
+      "id": "20261126030000_create_vw_student_360_performance",
+      "checksumSha256": "15100fbabdcfad446486454e027e628d8b6ecceb84fd88843dcf467c1cc24071",
+      "path": "prisma/migrations/20261126030000_create_vw_student_360_performance/migration.sql"
+    },
+    {
+      "id": "20261126040000_create_vw_module_attendance_risk",
+      "checksumSha256": "032ed46ef5f669d54e07843b74363e597e4f98d77d8ce4610affd9e33e80791b",
+      "path": "prisma/migrations/20261126040000_create_vw_module_attendance_risk/migration.sql"
+    },
+    {
+      "id": "20261126050000_create_vw_self_eval_discrepancy",
+      "checksumSha256": "18ebeced6ffca1fdc0ff252975a4f1fe09c24ad3c4231cdf6126f46f16ed660c",
+      "path": "prisma/migrations/20261126050000_create_vw_self_eval_discrepancy/migration.sql"
+    },
+    {
+      "id": "20261126060000_create_student_milestone_history_table",
+      "checksumSha256": "c684204ee2fbfa3aa6d4bda6bff7ee61cdf828b9e340b394807231aced9da83d",
+      "path": "prisma/migrations/20261126060000_create_student_milestone_history_table/migration.sql"
+    },
+    {
+      "id": "20261127000000_create_class_announcements_table",
+      "checksumSha256": "616880939c0e8b4dfa73360cf8f2f7993203fc44f438d8b653e4a9afb7a6d24c",
+      "path": "prisma/migrations/20261127000000_create_class_announcements_table/migration.sql"
+    },
+    {
+      "id": "20261127010000_create_help_requests_table",
+      "checksumSha256": "cf5b9689367bcf5ffcd3dd80482f7d871d4246e11ad59e856bd7987b51aa3885",
+      "path": "prisma/migrations/20261127010000_create_help_requests_table/migration.sql"
+    },
+    {
+      "id": "20261127020000_create_pedagogical_notes_table",
+      "checksumSha256": "4a084d10dc576ce4a5034ea2454cb3c090dea396558fc991dcc4baa420ee4c2b",
+      "path": "prisma/migrations/20261127020000_create_pedagogical_notes_table/migration.sql"
+    },
+    {
+      "id": "20261127030000_create_chat_messages_table",
+      "checksumSha256": "ab57ae3545ee59782d78f870dcf2d1b389de188705e3e0b533aa0898f3073543",
+      "path": "prisma/migrations/20261127030000_create_chat_messages_table/migration.sql"
+    },
+    {
+      "id": "20261127040000_create_gamification_badges_table",
+      "checksumSha256": "a4414d9904787a4d8c5c92a89ac936937dbed5311dc8022c1cc8568d0ad5a845",
+      "path": "prisma/migrations/20261127040000_create_gamification_badges_table/migration.sql"
+    },
+    {
+      "id": "20261127050000_create_student_achievements_table",
+      "checksumSha256": "fc94eb97489cbc2eb29822ee563c6b6f6f42f98e22b73e9250566858498cadf6",
+      "path": "prisma/migrations/20261127050000_create_student_achievements_table/migration.sql"
+    },
+    {
+      "id": "20261127060000_optimize_composite_and_partial_indexes",
+      "checksumSha256": "76715c8e4a88a0781a96e986144387dd7d59764e0ae1e52321fafbf1de41cab3",
+      "path": "prisma/migrations/20261127060000_optimize_composite_and_partial_indexes/migration.sql"
+    },
+    {
+      "id": "20261127070000_create_lgpd_retention_and_anonymization",
+      "checksumSha256": "beac1c2480514dd8242a4f17a4a7ef4412a1460b78957d0bf4bfa1b884490960",
+      "path": "prisma/migrations/20261127070000_create_lgpd_retention_and_anonymization/migration.sql"
     }
   ]
 }

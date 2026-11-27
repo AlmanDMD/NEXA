@@ -1,7 +1,7 @@
 /**
  * =============================================================================
- * PROJETO NEXA — SEED DE ESTRUTURA CURRICULAR SENAI + LOTE 3 (DIÁRIO & NOTAS)
- * CARDS: [DB-020] e [DB-030] | Comando: npm run db:seed
+ * PROJETO NEXA — SEED DE ESTRUTURA CURRICULAR SENAI + LOTE 3 + LOTE 4
+ * CARDS: [DB-020], [DB-030] e [DB-040] | Comando: npm run db:seed
  * Arquivo: prisma/seed.ts
  * =============================================================================
  * Popula de forma 100% IDEMPOTENTE (UPSERT / ON CONFLICT DO UPDATE) e com dados
@@ -40,6 +40,16 @@ type EnrollmentStatus = 'ACTIVE' | 'COMPLETED' | 'DROPPED' | 'SUSPENDED';
 type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'JUSTIFIED';
 type SubmissionStatus = 'PENDING' | 'SUBMITTED' | 'EVALUATED' | 'LATE';
 type AssessmentType = 'EXAM' | 'MICRO_EVALUATION' | 'PROJECT';
+type RiskLevel = 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+type AlertCategory = 'ATTENDANCE' | 'GRADE_DROP' | 'PENDING_TASKS' | 'SELF_EVAL_GAP';
+type AlertStatus = 'ACTIVE' | 'ACKNOWLEDGED' | 'RESOLVED';
+type DiagnosticType = 'ALIGNED' | 'OVERCONFIDENCE_RISK' | 'UNDERCONFIDENCE_SUPPORT' | 'INSUFFICIENT_EVIDENCE';
+type MilestoneType = 'MODULE_COMPLETED' | 'SKILL_LEVEL_UP' | 'PERFECT_ATTENDANCE' | 'RECOVERY_ACHIEVED';
+type AnnouncementPriority = 'NORMAL' | 'IMPORTANT' | 'URGENT';
+type HelpRequestCategory = 'TECHNICAL_DOUBT' | 'PRACTICAL_DIFFICULTY' | 'PERSONAL_PEDAGOGICAL';
+type HelpRequestStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+type NoteVisibilityScope = 'PRIVATE_AUTHOR' | 'TEACHERS_AND_COORD' | 'COORDINATION_ONLY';
+type NoteCategory = 'INTERVENTION' | 'MENTORING' | 'BEHAVIORAL' | 'ACCOMMODATION';
 type StudentScenarioProfile = 'HIGH_PERFORMER' | 'LATE_DELIVERY' | 'ATTENDANCE_BORDERLINE' | 'AT_RISK';
 
 interface CourseSeed {
@@ -124,6 +134,8 @@ interface TeacherAssignmentSeed {
 const ROOT_DIR: string = path.resolve(__dirname, '..');
 const SEED_SQL_PATH: string = path.join(ROOT_DIR, 'BancoNexa', 'sql', '20_seed_estrutura_curricular_senai.sql');
 const SEED_LOTE3_SQL_PATH: string = path.join(ROOT_DIR, 'BancoNexa', 'sql', '30_seed_frequencias_notas_parciais.sql');
+const SEED_LOTE4_SQL_PATH: string = path.join(ROOT_DIR, 'BancoNexa', 'sql', '40_seed_diagnosticos_alertas_lote4.sql');
+const SEED_LOTE5_SQL_PATH: string = path.join(ROOT_DIR, 'BancoNexa', 'sql', '45_seed_gamification_badges.sql');
 
 // Hash Bcrypt fictício sintético (60 chars) exclusivo para ambiente local de desenvolvimento/testes
 const DEMO_BCRYPT_HASH: string = '$2b$12$NexaSenaiDemoSeed20260uQwErTyUiOpAsDfGhJkLzXcVbNm1234';
@@ -1874,9 +1886,1316 @@ function validateAndSimulateLote3Seed(datasets: ReturnType<typeof buildLote3Oper
   };
 }
 
+// =============================================================================
+// LOTE 4 (DB-040) — AUTOAVALIAÇÕES, EVIDÊNCIAS, ALERTAS, DIAGNÓSTICOS E MARCOS
+// =============================================================================
+
+interface SelfAssessmentFormSeed {
+  id: string;
+  subjectCode: string;
+  moduleOrderIndex: number;
+  classCode: string;
+  classPeriod: string;
+  title: string;
+  instructions: string;
+  opensAt: string;
+  closesAt: string;
+  isActive: boolean;
+  createdByEmail: string;
+}
+
+interface StudentSelfAssessmentSeed {
+  formId: string;
+  studentEmail: string;
+  competencyCode: string;
+  perceivedLevel: number;
+  confidenceScore: number;
+  difficultyNotes: string | null;
+  submittedAt: string;
+}
+
+interface SkillEvidenceSeed {
+  id: string;
+  studentEmail: string;
+  competencyCode: string;
+  sourceTaskId: string | null;
+  sourceAssessmentId: string | null;
+  verifiedLevel: number;
+  verifiedByEmail: string;
+  recordedAt: string;
+}
+
+interface AcademicAlertSeed {
+  id: string;
+  studentEmail: string;
+  classCode: string;
+  classPeriod: string;
+  subjectCode: string | null;
+  moduleOrderIndex: number | null;
+  riskLevel: RiskLevel;
+  alertCategory: AlertCategory;
+  explainableReason: string;
+  metricSnapshot: Record<string, unknown>;
+  status: AlertStatus;
+  resolvedByEmail: string | null;
+  resolutionNotes: string | null;
+  createdAt: string;
+}
+
+interface ExplainableDiagnosticSeed {
+  id: string;
+  studentEmail: string;
+  classCode: string;
+  classPeriod: string;
+  subjectCode: string;
+  moduleOrderIndex: number;
+  competencyCode: string;
+  selfPerceivedLevel: number;
+  teacherVerifiedLevel: number;
+  diagnosticType: DiagnosticType;
+  explanationText: string;
+  limitationsNote: string;
+  recommendedAction: string;
+  generatedAt: string;
+}
+
+interface MilestoneHistorySeed {
+  id: string;
+  studentEmail: string;
+  classCode: string;
+  classPeriod: string;
+  subjectCode: string | null;
+  moduleOrderIndex: number | null;
+  milestoneType: MilestoneType;
+  title: string;
+  description: string;
+  metadata: Record<string, unknown>;
+  achievedAt: string;
+}
+
+const LOTE4_SELF_ASSESSMENT_FORMS_SEED: SelfAssessmentFormSeed[] = [
+  {
+    id: '40000000-0000-4000-8000-000000000001',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    title: 'Autoavaliação — Metrologia com Paquímetro e Tolerância H7 (MEC-2026-1)',
+    instructions: 'Avalie honestamente seu nível de domínio (1 a 5) e confiança na leitura de instrumentos metrológicos.',
+    opensAt: '2026-03-01T08:00:00Z',
+    closesAt: '2026-06-30T23:59:59Z',
+    isActive: true,
+    createdByEmail: 'instrutor.teoria.demo@senai.nexa.local',
+  },
+  {
+    id: '40000000-0000-4000-8000-000000000002',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    title: 'Autoavaliação — Módulo de Tornearia Cilíndrica e NR-12 (MEC-2026-1)',
+    instructions: 'Indique seu grau de segurança operacional, cálculo de RPM e domínio do torno convencional.',
+    opensAt: '2026-03-15T08:00:00Z',
+    closesAt: '2026-06-30T23:59:59Z',
+    isActive: true,
+    createdByEmail: 'instrutor.oficina.demo@senai.nexa.local',
+  },
+  {
+    id: '40000000-0000-4000-8000-000000000003',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    title: 'Autoavaliação — Metrologia Dimensional e Calibração (MEC-2026-2)',
+    instructions: 'Registre sua percepção de domínio nas medições lineares com paquímetro e conservação de instrumentos.',
+    opensAt: '2026-08-20T18:00:00Z',
+    closesAt: '2026-12-10T23:59:59Z',
+    isActive: true,
+    createdByEmail: 'instrutor.teoria.demo@senai.nexa.local',
+  },
+  {
+    id: '40000000-0000-4000-8000-000000000004',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    title: 'Autoavaliação — Tornearia Cilíndrica e Segurança NR-12 (MEC-2026-2)',
+    instructions: 'Informe seu domínio prático no faceamento, cilindramento externo e cumprimento da NR-12.',
+    opensAt: '2026-09-01T18:00:00Z',
+    closesAt: '2026-12-10T23:59:59Z',
+    isActive: true,
+    createdByEmail: 'instrutor.oficina.demo@senai.nexa.local',
+  },
+];
+
+// 20 Respostas de autoavaliação cobrindo Metrologia e Tornearia em ambas as turmas
+const LOTE4_SELF_ASSESSMENTS_SEED: StudentSelfAssessmentSeed[] = [
+  // MEC-2026-1 — Metrologia (Form 1)
+  { formId: '40000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo01@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: null, submittedAt: '2026-03-12T10:15:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo01@aluno.nexa.local', competencyCode: 'COMP-MET-04', perceivedLevel: 4, confidenceScore: 4, difficultyNotes: null, submittedAt: '2026-03-12T10:16:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo02@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 2, confidenceScore: 2, difficultyNotes: 'Sinto insegurança ao conferir tolerância H7 em furos internos.', submittedAt: '2026-03-13T09:20:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo04@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: 'Acredito dominar totalmente a leitura do nônio.', submittedAt: '2026-03-14T11:00:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo05@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 4, confidenceScore: 4, difficultyNotes: null, submittedAt: '2026-03-14T11:10:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo06@aluno.nexa.local', competencyCode: 'COMP-MET-04', perceivedLevel: 4, confidenceScore: 3, difficultyNotes: 'Aguardando primeira prática de calibração com blocos-padrão.', submittedAt: '2026-03-15T08:30:00Z' },
+  // MEC-2026-1 — Tornearia (Form 2)
+  { formId: '40000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo01@aluno.nexa.local', competencyCode: 'COMP-USI-01', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: null, submittedAt: '2026-03-28T10:00:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo02@aluno.nexa.local', competencyCode: 'COMP-USI-01', perceivedLevel: 2, confidenceScore: 2, difficultyNotes: 'Tenho receio de errar o passe final de acabamento no torno.', submittedAt: '2026-03-28T10:15:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo03@aluno.nexa.local', competencyCode: 'COMP-USI-02', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: 'Faço o cálculo de RPM de cabeça sem dificuldade.', submittedAt: '2026-03-29T09:40:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo04@aluno.nexa.local', competencyCode: 'COMP-SEG-02', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: 'Conheço bem todas as regras da NR-12 no torno.', submittedAt: '2026-03-29T10:05:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo07@aluno.nexa.local', competencyCode: 'COMP-USI-01', perceivedLevel: 4, confidenceScore: 4, difficultyNotes: null, submittedAt: '2026-03-30T11:20:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo08@aluno.nexa.local', competencyCode: 'COMP-USI-02', perceivedLevel: 3, confidenceScore: 3, difficultyNotes: 'Dúvida na seleção de avanço para aço 1045.', submittedAt: '2026-03-30T11:35:00Z' },
+  // MEC-2026-2 — Metrologia (Form 3)
+  { formId: '40000000-0000-4000-8000-000000000003', studentEmail: 'estudante.demo19@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: null, submittedAt: '2026-09-02T20:10:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000003', studentEmail: 'estudante.demo20@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 2, confidenceScore: 2, difficultyNotes: 'Acho que levo tempo demais para conferir medidas com micrômetro.', submittedAt: '2026-09-02T20:25:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000003', studentEmail: 'estudante.demo21@aluno.nexa.local', competencyCode: 'COMP-MET-01', perceivedLevel: 5, confidenceScore: 4, difficultyNotes: 'Leitura em polegada fracionária já dominada.', submittedAt: '2026-09-03T19:45:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000003', studentEmail: 'estudante.demo22@aluno.nexa.local', competencyCode: 'COMP-MET-04', perceivedLevel: 3, confidenceScore: 3, difficultyNotes: null, submittedAt: '2026-09-03T20:00:00Z' },
+  // MEC-2026-2 — Tornearia (Form 4)
+  { formId: '40000000-0000-4000-8000-000000000004', studentEmail: 'estudante.demo19@aluno.nexa.local', competencyCode: 'COMP-USI-01', perceivedLevel: 5, confidenceScore: 4, difficultyNotes: null, submittedAt: '2026-09-22T20:00:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000004', studentEmail: 'estudante.demo21@aluno.nexa.local', competencyCode: 'COMP-USI-01', perceivedLevel: 5, confidenceScore: 5, difficultyNotes: 'Já usinei eixos parecidos antes.', submittedAt: '2026-09-22T20:15:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000004', studentEmail: 'estudante.demo22@aluno.nexa.local', competencyCode: 'COMP-USI-02', perceivedLevel: 2, confidenceScore: 2, difficultyNotes: 'Insegurança no cálculo da profundidade de corte.', submittedAt: '2026-09-23T19:50:00Z' },
+  { formId: '40000000-0000-4000-8000-000000000004', studentEmail: 'estudante.demo23@aluno.nexa.local', competencyCode: 'COMP-SEG-02', perceivedLevel: 4, confidenceScore: 4, difficultyNotes: null, submittedAt: '2026-09-23T20:10:00Z' },
+];
+
+// 16 Evidências práticas verificadas por docentes (skill_evidences) vinculadas a submissões e avaliações do Lote 3
+const LOTE4_SKILL_EVIDENCES_SEED: SkillEvidenceSeed[] = [
+  // Metrologia (MEC-2026-1)
+  { id: '41000000-0000-4000-8000-000000000001', studentEmail: 'estudante.demo01@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: '31000000-0000-4000-8000-000000000001', sourceAssessmentId: null, verifiedLevel: 4.8, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-10T11:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000002', studentEmail: 'estudante.demo01@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: null, sourceAssessmentId: '32000000-0000-4000-8000-000000000001', verifiedLevel: 4.6, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-11T11:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000003', studentEmail: 'estudante.demo02@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: '31000000-0000-4000-8000-000000000001', sourceAssessmentId: null, verifiedLevel: 4.5, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-10T11:30:00Z' },
+  { id: '41000000-0000-4000-8000-000000000004', studentEmail: 'estudante.demo02@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: null, sourceAssessmentId: '32000000-0000-4000-8000-000000000001', verifiedLevel: 4.3, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-11T11:30:00Z' },
+  { id: '41000000-0000-4000-8000-000000000005', studentEmail: 'estudante.demo04@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: '31000000-0000-4000-8000-000000000001', sourceAssessmentId: null, verifiedLevel: 2.4, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-10T12:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000006', studentEmail: 'estudante.demo04@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: null, sourceAssessmentId: '32000000-0000-4000-8000-000000000001', verifiedLevel: 2.2, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-11T12:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000007', studentEmail: 'estudante.demo05@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: '31000000-0000-4000-8000-000000000001', sourceAssessmentId: null, verifiedLevel: 3.8, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-03-10T12:20:00Z' },
+  // Tornearia & NR-12 (MEC-2026-1)
+  { id: '41000000-0000-4000-8000-000000000008', studentEmail: 'estudante.demo01@aluno.nexa.local', competencyCode: 'COMP-USI-01', sourceTaskId: '31000000-0000-4000-8000-000000000003', sourceAssessmentId: null, verifiedLevel: 4.9, verifiedByEmail: 'instrutor.oficina.demo@senai.nexa.local', recordedAt: '2026-03-26T11:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000009', studentEmail: 'estudante.demo02@aluno.nexa.local', competencyCode: 'COMP-USI-01', sourceTaskId: '31000000-0000-4000-8000-000000000003', sourceAssessmentId: null, verifiedLevel: 4.2, verifiedByEmail: 'instrutor.oficina.demo@senai.nexa.local', recordedAt: '2026-03-26T11:20:00Z' },
+  { id: '41000000-0000-4000-8000-000000000010', studentEmail: 'estudante.demo03@aluno.nexa.local', competencyCode: 'COMP-USI-02', sourceTaskId: null, sourceAssessmentId: '32000000-0000-4000-8000-000000000002', verifiedLevel: 2.3, verifiedByEmail: 'instrutor.oficina.demo@senai.nexa.local', recordedAt: '2026-03-27T11:40:00Z' },
+  { id: '41000000-0000-4000-8000-000000000011', studentEmail: 'estudante.demo04@aluno.nexa.local', competencyCode: 'COMP-SEG-02', sourceTaskId: '31000000-0000-4000-8000-000000000003', sourceAssessmentId: null, verifiedLevel: 2.1, verifiedByEmail: 'instrutor.oficina.demo@senai.nexa.local', recordedAt: '2026-03-26T12:00:00Z' },
+  // Metrologia & Tornearia (MEC-2026-2)
+  { id: '41000000-0000-4000-8000-000000000012', studentEmail: 'estudante.demo19@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: '31000000-0000-4000-8000-000000000005', sourceAssessmentId: null, verifiedLevel: 4.7, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-09-01T21:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000013', studentEmail: 'estudante.demo20@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: '31000000-0000-4000-8000-000000000005', sourceAssessmentId: null, verifiedLevel: 4.4, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-09-01T21:15:00Z' },
+  { id: '41000000-0000-4000-8000-000000000014', studentEmail: 'estudante.demo21@aluno.nexa.local', competencyCode: 'COMP-MET-01', sourceTaskId: null, sourceAssessmentId: '32000000-0000-4000-8000-000000000003', verifiedLevel: 2.5, verifiedByEmail: 'instrutor.teoria.demo@senai.nexa.local', recordedAt: '2026-09-01T21:30:00Z' },
+  { id: '41000000-0000-4000-8000-000000000015', studentEmail: 'estudante.demo21@aluno.nexa.local', competencyCode: 'COMP-USI-01', sourceTaskId: '31000000-0000-4000-8000-000000000006', sourceAssessmentId: null, verifiedLevel: 2.6, verifiedByEmail: 'instrutor.oficina.demo@senai.nexa.local', recordedAt: '2026-09-21T21:00:00Z' },
+  { id: '41000000-0000-4000-8000-000000000016', studentEmail: 'estudante.demo22@aluno.nexa.local', competencyCode: 'COMP-USI-02', sourceTaskId: null, sourceAssessmentId: '32000000-0000-4000-8000-000000000004', verifiedLevel: 4.1, verifiedByEmail: 'instrutor.oficina.demo@senai.nexa.local', recordedAt: '2026-09-21T21:20:00Z' },
+];
+
+// 8 Alertas Acadêmicos Explicáveis cobrindo LOW, MODERATE, HIGH e CRITICAL e todas as 4 categorias
+const LOTE4_ACADEMIC_ALERTS_SEED: AcademicAlertSeed[] = [
+  {
+    id: '42000000-0000-4000-8000-000000000001',
+    studentEmail: 'estudante.demo04@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    riskLevel: 'CRITICAL',
+    alertCategory: 'ATTENDANCE',
+    explainableReason: 'Frequência acumulada atingiu 68.00% (8h de faltas não justificadas em 25h ministradas), abaixo do mínimo institucional de 75% do SENAI.',
+    metricSnapshot: { attendance_rate_pct: 68.0, absent_hours: 8, total_hours: 25, senai_min_pct: 75.0 },
+    status: 'ACTIVE',
+    resolvedByEmail: null,
+    resolutionNotes: null,
+    createdAt: '2026-03-28T13:00:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000002',
+    studentEmail: 'estudante.demo04@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    riskLevel: 'CRITICAL',
+    alertCategory: 'SELF_EVAL_GAP',
+    explainableReason: 'Superestimação crítica em Segurança NR-12 no Torno: aluno declarou nível 5.00, mas evidência prática docente registrou 2.10 (gap +2.90).',
+    metricSnapshot: { competency_code: 'COMP-SEG-02', perceived_level: 5.0, avg_verified_level: 2.1, discrepancy_gap: 2.9 },
+    status: 'ACTIVE',
+    resolvedByEmail: null,
+    resolutionNotes: null,
+    createdAt: '2026-03-29T14:15:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000003',
+    studentEmail: 'estudante.demo03@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    riskLevel: 'HIGH',
+    alertCategory: 'ATTENDANCE',
+    explainableReason: 'Frequência em 76.00% no limiar preventivo (< 78%); mais 1 falta de 4h colocará o estudante abaixo do mínimo de 75%.',
+    metricSnapshot: { attendance_rate_pct: 76.0, absent_hours: 6, total_hours: 25, warning_threshold_pct: 78.0 },
+    status: 'ACTIVE',
+    resolvedByEmail: null,
+    resolutionNotes: null,
+    createdAt: '2026-03-25T15:00:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000004',
+    studentEmail: 'estudante.demo08@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    riskLevel: 'HIGH',
+    alertCategory: 'GRADE_DROP',
+    explainableReason: 'Queda de rendimento nas avaliações formativas: média ponderada caiu de 7.40 para 5.20 abaixo da nota de corte (7.00) em Usinagem.',
+    metricSnapshot: { previous_avg: 7.4, current_avg: 5.2, passing_score: 7.0, drop_points: -2.2 },
+    status: 'ACKNOWLEDGED',
+    resolvedByEmail: 'instrutor.oficina.demo@senai.nexa.local',
+    resolutionNotes: 'Agendada revisão prática de parâmetros de corte na próxima oficina.',
+    createdAt: '2026-03-29T16:00:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000005',
+    studentEmail: 'estudante.demo02@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    riskLevel: 'MODERATE',
+    alertCategory: 'PENDING_TASKS',
+    explainableReason: '2 entregas práticas em atraso/pendentes na oficina de Metrologia e Desenho Técnico necessitando reagendamento de bancada.',
+    metricSnapshot: { late_tasks: 1, pending_tasks: 1, total_tasks: 4 },
+    status: 'ACTIVE',
+    resolvedByEmail: null,
+    resolutionNotes: null,
+    createdAt: '2026-03-24T11:30:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000006',
+    studentEmail: 'estudante.demo21@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    riskLevel: 'HIGH',
+    alertCategory: 'SELF_EVAL_GAP',
+    explainableReason: 'Divergência elevada em Tornearia Cilíndrica (MEC-2026-2): autopercepção 5.00 vs. evidência prática docente 2.60 (gap +2.40).',
+    metricSnapshot: { competency_code: 'COMP-USI-01', perceived_level: 5.0, avg_verified_level: 2.6, discrepancy_gap: 2.4 },
+    status: 'ACTIVE',
+    resolvedByEmail: null,
+    resolutionNotes: null,
+    createdAt: '2026-09-23T21:00:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000007',
+    studentEmail: 'estudante.demo22@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    riskLevel: 'MODERATE',
+    alertCategory: 'GRADE_DROP',
+    explainableReason: 'Nota parcial de Metrologia Dimensional em 5.80, ligeiramente abaixo da nota de corte (6.00); recomendada prática adicional com micrômetro.',
+    metricSnapshot: { current_avg: 5.8, passing_score: 6.0, recovery_available: true },
+    status: 'ACTIVE',
+    resolvedByEmail: null,
+    resolutionNotes: null,
+    createdAt: '2026-09-10T21:15:00Z',
+  },
+  {
+    id: '42000000-0000-4000-8000-000000000008',
+    studentEmail: 'estudante.demo05@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    riskLevel: 'LOW',
+    alertCategory: 'PENDING_TASKS',
+    explainableReason: '1 atividade prática com entrega próxima do vencimento; desempenho geral e frequência permanecem saudáveis (88%).',
+    metricSnapshot: { pending_tasks: 1, late_tasks: 0, attendance_rate_pct: 88.0 },
+    status: 'RESOLVED',
+    resolvedByEmail: 'instrutor.teoria.demo@senai.nexa.local',
+    resolutionNotes: 'Estudante entregou o laudo metrológico dentro do prazo estendido.',
+    createdAt: '2026-03-18T10:00:00Z',
+  },
+];
+
+// 10 Diagnósticos Comparativos Explicáveis (cobrindo divergências reais em Metrologia e Tornearia)
+const LOTE4_EXPLAINABLE_DIAGNOSTICS_SEED: ExplainableDiagnosticSeed[] = [
+  {
+    id: '43000000-0000-4000-8000-000000000001',
+    studentEmail: 'estudante.demo04@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-MET-01',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 2.3,
+    diagnosticType: 'OVERCONFIDENCE_RISK',
+    explanationText: 'Divergência de +2.70 pontos em Metrologia (Paquímetro e Tolerância H7): estudante se autoavaliou em 5.00, enquanto 2 evidências docentes (prática + prova) resultaram em média 2.30.',
+    limitationsNote: 'Baseado em 2 evidências (1 peça de bancada e 1 prova teórica); autoavaliação isolada não comprova domínio metrológico.',
+    recommendedAction: 'Realizar sessão prática assistida de leitura de nônio 0,02 mm com conferência cruzada pelo instrutor.',
+    generatedAt: '2026-03-15T14:00:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000002',
+    studentEmail: 'estudante.demo04@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-SEG-02',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 2.1,
+    diagnosticType: 'OVERCONFIDENCE_RISK',
+    explanationText: 'Risco crítico de superestimação em Tornearia / Segurança NR-12: percepção 5.00 contra 2.10 verificado na bancada (gap +2.90).',
+    limitationsNote: 'Baseado em 1 avaliação prática de torno convencional; requer nova observação direta de checklist NR-12 antes de operação autônoma.',
+    recommendedAction: 'Bloquear operação autônoma do torno até aprovação no checklist presencial de segurança NR-12.',
+    generatedAt: '2026-03-30T14:00:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000003',
+    studentEmail: 'estudante.demo03@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-USI-02',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 2.3,
+    diagnosticType: 'OVERCONFIDENCE_RISK',
+    explanationText: 'Divergência de +2.70 pontos em Tornearia (Cálculo de RPM e Avanço): estudante declarou domínio máximo (5.00), mas a microavaliação apontou 2.30.',
+    limitationsNote: 'Baseado em 1 microavaliação escrita; confirmar domínio na regulagem da caixa Norton durante a oficina.',
+    recommendedAction: 'Aplicar exercícios guiados de velocidade de corte e seleção de engrenagens no torno.',
+    generatedAt: '2026-03-30T14:20:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000004',
+    studentEmail: 'estudante.demo02@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-MET-01',
+    selfPerceivedLevel: 2.0,
+    teacherVerifiedLevel: 4.4,
+    diagnosticType: 'UNDERCONFIDENCE_SUPPORT',
+    explanationText: 'Subestimação em Metrologia (Paquímetro e Tolerância H7): estudante se avaliou em 2.00 apesar de média docente 4.40 (gap -2.40).',
+    limitationsNote: 'Baseado em 2 evidências consistentes; indica insegurança percebida mesmo com desempenho técnico sólido.',
+    recommendedAction: 'Oferecer feedback positivo com os laudos corrigidos para fortalecer a autoconfiança na bancada.',
+    generatedAt: '2026-03-15T14:30:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000005',
+    studentEmail: 'estudante.demo02@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-USI-01',
+    selfPerceivedLevel: 2.0,
+    teacherVerifiedLevel: 4.2,
+    diagnosticType: 'UNDERCONFIDENCE_SUPPORT',
+    explanationText: 'Subestimação em Tornearia Cilíndrica: estudante marcou nível 2.00, porém entregou eixo escalonado avaliado em 4.20 (gap -2.20).',
+    limitationsNote: 'Baseado em 1 peça usinada avaliada por rubrica; acompanhar confiança nos passes de acabamento.',
+    recommendedAction: 'Propor desafio prático progressivo de acabamento com validação imediata de rugosidade.',
+    generatedAt: '2026-03-30T14:40:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000006',
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-MET-01',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 4.7,
+    diagnosticType: 'ALIGNED',
+    explanationText: 'Alinhamento excelente em Metrologia: autopercepção 5.00 compatível com média docente 4.70 (gap +0.30).',
+    limitationsNote: 'Baseado em 2 evidências (bancada e prova); manter acompanhamento no módulo de micrômetro centesimal.',
+    recommendedAction: 'Avançar para desafios de medição avançada e monitoria entre pares na oficina.',
+    generatedAt: '2026-03-15T15:00:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000007',
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-USI-01',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 4.9,
+    diagnosticType: 'ALIGNED',
+    explanationText: 'Alinhamento consistente em Tornearia Cilíndrica: autopercepção 5.00 e avaliação docente 4.90 (gap +0.10).',
+    limitationsNote: 'Baseado na peça prática de torneamento externo avaliada com rubrica completa.',
+    recommendedAction: 'Liberar avanço para o módulo de Fresamento de Superfícies Planas e Rasgos.',
+    generatedAt: '2026-03-30T15:00:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000008',
+    studentEmail: 'estudante.demo21@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-MET-01',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 2.5,
+    diagnosticType: 'OVERCONFIDENCE_RISK',
+    explanationText: 'Superestimação em Metrologia Dimensional (MEC-2026-2): percepção 5.00 versus evidência docente 2.50 (gap +2.50).',
+    limitationsNote: 'Baseado em 1 avaliação teórica; complementar com checagem prática de leitura de paquímetro na oficina.',
+    recommendedAction: 'Agendar bancada de reforço de leitura de paquímetro em milímetros e polegadas.',
+    generatedAt: '2026-09-05T21:00:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000009',
+    studentEmail: 'estudante.demo21@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-USI-01',
+    selfPerceivedLevel: 5.0,
+    teacherVerifiedLevel: 2.6,
+    diagnosticType: 'OVERCONFIDENCE_RISK',
+    explanationText: 'Superestimação em Tornearia Cilíndrica (MEC-2026-2): autopercepção 5.00 frente a 2.60 na peça avaliada (gap +2.40).',
+    limitationsNote: 'Baseado na entrega prática do pino guia; desvios dimensionais acima da tolerância especificada.',
+    recommendedAction: 'Revisar alinhamento de contraponta e conferência intermediária com micrômetro antes do passe final.',
+    generatedAt: '2026-09-24T21:00:00Z',
+  },
+  {
+    id: '43000000-0000-4000-8000-000000000010',
+    studentEmail: 'estudante.demo20@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    competencyCode: 'COMP-MET-01',
+    selfPerceivedLevel: 2.0,
+    teacherVerifiedLevel: 4.4,
+    diagnosticType: 'UNDERCONFIDENCE_SUPPORT',
+    explanationText: 'Subestimação em Metrologia (MEC-2026-2): estudante declarou nível 2.00, mas obteve 4.40 na entrega prática (gap -2.40).',
+    limitationsNote: 'Baseado em 1 entrega prática com excelente precisão; reforçar confiança na execução sob tempo.',
+    recommendedAction: 'Destacar a acurácia alcançada no laudo metrológico e estimular participação ativa em equipe.',
+    generatedAt: '2026-09-05T21:30:00Z',
+  },
+];
+
+// 8 Marcos positivos na Linha do Tempo Acadêmica (student_milestone_history)
+const LOTE4_MILESTONES_SEED: MilestoneHistorySeed[] = [
+  {
+    id: '44000000-0000-4000-8000-000000000001',
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    milestoneType: 'MODULE_COMPLETED',
+    title: 'Módulo de Metrologia com Paquímetro Concluído com Excelência',
+    description: 'Concluiu todas as práticas de medição linear e tolerância H7 acima da nota de corte.',
+    metadata: { final_module_score: 9.4, passing_score: 6.0 },
+    achievedAt: '2026-03-12T12:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000002',
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    milestoneType: 'SKILL_LEVEL_UP',
+    title: 'Evolução para Nível 5 em Tornearia Cilíndrica',
+    description: 'Atingiu domínio avançado (nível 4.90) na usinagem de eixos escalonados em torno convencional.',
+    metadata: { competency_code: 'COMP-USI-01', verified_level: 4.9 },
+    achievedAt: '2026-03-28T12:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000003',
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: null,
+    moduleOrderIndex: null,
+    milestoneType: 'PERFECT_ATTENDANCE',
+    title: '100% de Presença nas Oficinas do 1º Trimestre',
+    description: 'Nenhuma falta registrada em todas as 25 horas de laboratório ministradas até o momento.',
+    metadata: { attendance_rate_pct: 100.0, total_hours: 25 },
+    achievedAt: '2026-03-31T17:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000004',
+    studentEmail: 'estudante.demo02@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    milestoneType: 'SKILL_LEVEL_UP',
+    title: 'Progresso Verificado em Metrologia (Nível 4.40)',
+    description: 'Demonstrou alta precisão em leituras com paquímetro e conferência de tolerância ISO.',
+    metadata: { competency_code: 'COMP-MET-01', verified_level: 4.4 },
+    achievedAt: '2026-03-14T12:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000005',
+    studentEmail: 'estudante.demo05@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    milestoneType: 'RECOVERY_ACHIEVED',
+    title: 'Recuperação Concluída em Metrologia Dimensional',
+    description: 'Elevou o desempenho na avaliação de recuperação superando a nota de corte institucional.',
+    metadata: { previous_grade: 5.5, recovery_grade: 7.8 },
+    achievedAt: '2026-03-22T15:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000006',
+    studentEmail: 'estudante.demo19@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    milestoneType: 'MODULE_COMPLETED',
+    title: 'Módulo de Metrologia Concluído (Turma Noite)',
+    description: 'Completou todas as práticas de medição dimensional com desempenho de destaque.',
+    metadata: { final_module_score: 9.1, passing_score: 6.0 },
+    achievedAt: '2026-09-05T22:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000007',
+    studentEmail: 'estudante.demo19@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: null,
+    moduleOrderIndex: null,
+    milestoneType: 'PERFECT_ATTENDANCE',
+    title: 'Frequência Exemplar (100%) no Turno Noturno',
+    description: 'Assiduidade integral em todas as aulas presenciais de laboratório da turma MEC-2026-2.',
+    metadata: { attendance_rate_pct: 100.0, total_hours: 25 },
+    achievedAt: '2026-09-25T22:00:00Z',
+  },
+  {
+    id: '44000000-0000-4000-8000-000000000008',
+    studentEmail: 'estudante.demo20@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 1,
+    milestoneType: 'SKILL_LEVEL_UP',
+    title: 'Alta Acurácia Metrológica Validada na Bancada',
+    description: 'Atingiu nível 4.40 em medições com paquímetro e laudo dimensional.',
+    metadata: { competency_code: 'COMP-MET-01', verified_level: 4.4 },
+    achievedAt: '2026-09-06T21:30:00Z',
+  },
+];
+
+function buildLote4IdempotentSeedSql(): string {
+  const lines: string[] = [
+    '-- =============================================================================',
+    '-- PROJETO NEXA — SEED IDEMPOTENTE LOTE 4: AUTOAVALIAÇÃO, ALERTAS & DIAGNÓSTICOS (DB-040)',
+    '-- SGBD: PostgreSQL 16 (UPSERT via ON CONFLICT DO UPDATE)',
+    '-- 4 Formulários, 20 Autoavaliações, 16 Evidências, 8 Alertas, 10 Diagnósticos, 8 Marcos',
+    '-- =============================================================================',
+    '',
+    'BEGIN;',
+    '',
+    '-- 1. Formulários de Autoavaliação (self_assessment_forms — DB-031)',
+  ];
+
+  for (const f of LOTE4_SELF_ASSESSMENT_FORMS_SEED) {
+    lines.push(
+      `INSERT INTO self_assessment_forms (id, module_id, class_id, title, instructions, opens_at, closes_at, is_active, created_by)`,
+      `SELECT ${sqlLiteral(f.id)}::UUID, lm.id, cl.id, ${sqlLiteral(f.title)}, ${sqlLiteral(f.instructions)}, TIMESTAMPTZ ${sqlLiteral(f.opensAt)}, TIMESTAMPTZ ${sqlLiteral(f.closesAt)}, ${f.isActive ? 'TRUE' : 'FALSE'}, u.id`,
+      `FROM subjects s`,
+      `JOIN learning_modules lm ON lm.subject_id = s.id AND lm.order_index = ${f.moduleOrderIndex}`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(f.classCode)} AND cl.period = ${sqlLiteral(f.classPeriod)}`,
+      `JOIN users u ON u.email = ${sqlLiteral(f.createdByEmail)}`,
+      `WHERE s.code = ${sqlLiteral(f.subjectCode)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET title = EXCLUDED.title, instructions = EXCLUDED.instructions, opens_at = EXCLUDED.opens_at, closes_at = EXCLUDED.closes_at, is_active = EXCLUDED.is_active;`,
+      ''
+    );
+  }
+
+  lines.push('-- 2. Respostas de Autoavaliação dos Estudantes (student_self_assessments — DB-032)');
+  for (const sa of LOTE4_SELF_ASSESSMENTS_SEED) {
+    lines.push(
+      `INSERT INTO student_self_assessments (form_id, student_id, competency_id, perceived_level, confidence_score, difficulty_notes, submitted_at)`,
+      `SELECT ${sqlLiteral(sa.formId)}::UUID, u.id, cp.id, ${sa.perceivedLevel}, ${sa.confidenceScore}, ${sqlLiteral(sa.difficultyNotes)}, TIMESTAMPTZ ${sqlLiteral(sa.submittedAt)}`,
+      `FROM users u`,
+      `JOIN competencies cp ON cp.code = ${sqlLiteral(sa.competencyCode)}`,
+      `WHERE u.email = ${sqlLiteral(sa.studentEmail)}`,
+      `ON CONFLICT (form_id, student_id, competency_id) DO UPDATE`,
+      `SET perceived_level = EXCLUDED.perceived_level, confidence_score = EXCLUDED.confidence_score, difficulty_notes = EXCLUDED.difficulty_notes, submitted_at = EXCLUDED.submitted_at;`,
+      ''
+    );
+  }
+
+  lines.push('-- 3. Evidências Práticas Verificadas por Docentes (skill_evidences — DB-033)');
+  for (const ev of LOTE4_SKILL_EVIDENCES_SEED) {
+    const subExpr = ev.sourceTaskId
+      ? `(SELECT ts.id FROM task_submissions ts WHERE ts.task_id = ${sqlLiteral(ev.sourceTaskId)}::UUID AND ts.student_id = stu.id LIMIT 1)`
+      : 'NULL::UUID';
+    const assExpr = ev.sourceAssessmentId ? `${sqlLiteral(ev.sourceAssessmentId)}::UUID` : 'NULL::UUID';
+    lines.push(
+      `INSERT INTO skill_evidences (id, student_id, competency_id, source_submission_id, source_assessment_id, verified_level, verified_by, recorded_at)`,
+      `SELECT ${sqlLiteral(ev.id)}::UUID, stu.id, cp.id, ${subExpr}, ${assExpr}, ${ev.verifiedLevel.toFixed(2)}, tch.id, TIMESTAMPTZ ${sqlLiteral(ev.recordedAt)}`,
+      `FROM users stu`,
+      `JOIN competencies cp ON cp.code = ${sqlLiteral(ev.competencyCode)}`,
+      `JOIN users tch ON tch.email = ${sqlLiteral(ev.verifiedByEmail)}`,
+      `WHERE stu.email = ${sqlLiteral(ev.studentEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET verified_level = EXCLUDED.verified_level, verified_by = EXCLUDED.verified_by, recorded_at = EXCLUDED.recorded_at;`,
+      ''
+    );
+  }
+
+  lines.push('-- 4. Alertas Acadêmicos Explicáveis (8 alertas: LOW, MODERATE, HIGH, CRITICAL — DB-034)');
+  for (const al of LOTE4_ACADEMIC_ALERTS_SEED) {
+    const modExpr =
+      al.subjectCode && al.moduleOrderIndex
+        ? `(SELECT lm.id FROM learning_modules lm JOIN subjects s ON s.id = lm.subject_id WHERE s.code = ${sqlLiteral(al.subjectCode)} AND lm.order_index = ${al.moduleOrderIndex} LIMIT 1)`
+        : 'NULL::UUID';
+    const resExpr = al.resolvedByEmail
+      ? `(SELECT u2.id FROM users u2 WHERE u2.email = ${sqlLiteral(al.resolvedByEmail)} LIMIT 1)`
+      : 'NULL::UUID';
+    lines.push(
+      `INSERT INTO academic_alerts (id, student_id, enrollment_id, class_id, module_id, risk_level, alert_category, explainable_reason, metric_snapshot, status, resolved_by, resolution_notes, created_at)`,
+      `SELECT ${sqlLiteral(al.id)}::UUID, stu.id, enr.id, cl.id, ${modExpr}, ${sqlLiteral(al.riskLevel)}::risk_level_enum, ${sqlLiteral(al.alertCategory)}::alert_category_enum, ${sqlLiteral(al.explainableReason)}, ${sqlLiteral(JSON.stringify(al.metricSnapshot))}::JSONB, ${sqlLiteral(al.status)}::alert_status_enum, ${resExpr}, ${sqlLiteral(al.resolutionNotes)}, TIMESTAMPTZ ${sqlLiteral(al.createdAt)}`,
+      `FROM users stu`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(al.classCode)} AND cl.period = ${sqlLiteral(al.classPeriod)}`,
+      `JOIN enrollments enr ON enr.student_id = stu.id AND enr.class_id = cl.id`,
+      `WHERE stu.email = ${sqlLiteral(al.studentEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET risk_level = EXCLUDED.risk_level, explainable_reason = EXCLUDED.explainable_reason, metric_snapshot = EXCLUDED.metric_snapshot, status = EXCLUDED.status, resolved_by = EXCLUDED.resolved_by, resolution_notes = EXCLUDED.resolution_notes;`,
+      ''
+    );
+  }
+
+  lines.push('-- 5. Diagnósticos Explicáveis Comparativos (10 diagnósticos em Metrologia e Tornearia — DB-035)');
+  for (const d of LOTE4_EXPLAINABLE_DIAGNOSTICS_SEED) {
+    const gap = Number((d.selfPerceivedLevel - d.teacherVerifiedLevel).toFixed(2));
+    lines.push(
+      `INSERT INTO explainable_diagnostics (id, student_id, class_id, module_id, competency_id, self_perceived_level, teacher_verified_level, discrepancy_gap, diagnostic_type, explanation_text, limitations_note, recommended_action, generated_at)`,
+      `SELECT ${sqlLiteral(d.id)}::UUID, stu.id, cl.id, lm.id, cp.id, ${d.selfPerceivedLevel.toFixed(2)}, ${d.teacherVerifiedLevel.toFixed(2)}, ${gap.toFixed(2)}, ${sqlLiteral(d.diagnosticType)}::diagnostic_type_enum, ${sqlLiteral(d.explanationText)}, ${sqlLiteral(d.limitationsNote)}, ${sqlLiteral(d.recommendedAction)}, TIMESTAMPTZ ${sqlLiteral(d.generatedAt)}`,
+      `FROM users stu`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(d.classCode)} AND cl.period = ${sqlLiteral(d.classPeriod)}`,
+      `JOIN subjects s ON s.code = ${sqlLiteral(d.subjectCode)}`,
+      `JOIN learning_modules lm ON lm.subject_id = s.id AND lm.order_index = ${d.moduleOrderIndex}`,
+      `JOIN competencies cp ON cp.code = ${sqlLiteral(d.competencyCode)}`,
+      `WHERE stu.email = ${sqlLiteral(d.studentEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET self_perceived_level = EXCLUDED.self_perceived_level, teacher_verified_level = EXCLUDED.teacher_verified_level, discrepancy_gap = EXCLUDED.discrepancy_gap, diagnostic_type = EXCLUDED.diagnostic_type, explanation_text = EXCLUDED.explanation_text, limitations_note = EXCLUDED.limitations_note, recommended_action = EXCLUDED.recommended_action;`,
+      ''
+    );
+  }
+
+  lines.push('-- 6. Histórico e Linha do Tempo de Marcos Acadêmicos (student_milestone_history — DB-039)');
+  for (const ms of LOTE4_MILESTONES_SEED) {
+    const modExpr =
+      ms.subjectCode && ms.moduleOrderIndex
+        ? `(SELECT lm.id FROM learning_modules lm JOIN subjects s ON s.id = lm.subject_id WHERE s.code = ${sqlLiteral(ms.subjectCode)} AND lm.order_index = ${ms.moduleOrderIndex} LIMIT 1)`
+        : 'NULL::UUID';
+    lines.push(
+      `INSERT INTO student_milestone_history (id, student_id, enrollment_id, module_id, milestone_type, title, description, metadata, achieved_at)`,
+      `SELECT ${sqlLiteral(ms.id)}::UUID, stu.id, enr.id, ${modExpr}, ${sqlLiteral(ms.milestoneType)}::milestone_type_enum, ${sqlLiteral(ms.title)}, ${sqlLiteral(ms.description)}, ${sqlLiteral(JSON.stringify(ms.metadata))}::JSONB, TIMESTAMPTZ ${sqlLiteral(ms.achievedAt)}`,
+      `FROM users stu`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(ms.classCode)} AND cl.period = ${sqlLiteral(ms.classPeriod)}`,
+      `JOIN enrollments enr ON enr.student_id = stu.id AND enr.class_id = cl.id`,
+      `WHERE stu.email = ${sqlLiteral(ms.studentEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET milestone_type = EXCLUDED.milestone_type, title = EXCLUDED.title, description = EXCLUDED.description, metadata = EXCLUDED.metadata, achieved_at = EXCLUDED.achieved_at;`,
+      ''
+    );
+  }
+
+  lines.push('COMMIT;', '');
+  return lines.join('\n');
+}
+
+function validateAndSimulateLote4Seed(): {
+  selfAssessmentForms: number;
+  selfAssessments: number;
+  skillEvidences: number;
+  academicAlerts: number;
+  explainableDiagnostics: number;
+  milestones: number;
+} {
+  const forms = new Map<string, SelfAssessmentFormSeed>();
+  const responses = new Map<string, StudentSelfAssessmentSeed>();
+  const evidences = new Map<string, SkillEvidenceSeed>();
+  const alerts = new Map<string, AcademicAlertSeed>();
+  const diagnostics = new Map<string, ExplainableDiagnosticSeed>();
+  const milestones = new Map<string, MilestoneHistorySeed>();
+
+  // 2 passagens de upsert comprovando idempotência determinística
+  for (let pass = 1; pass <= 2; pass++) {
+    for (const f of LOTE4_SELF_ASSESSMENT_FORMS_SEED) {
+      if (!(f.opensAt < f.closesAt)) throw new Error(`Janela inválida em form ${f.id}`);
+      forms.set(f.id, f);
+    }
+    for (const sa of LOTE4_SELF_ASSESSMENTS_SEED) {
+      const form = forms.get(sa.formId);
+      if (!form) throw new Error(`Form ausente: ${sa.formId}`);
+      if (sa.perceivedLevel < 1 || sa.perceivedLevel > 5 || sa.confidenceScore < 1 || sa.confidenceScore > 5) {
+        throw new Error(`Autoavaliação fora de 1..5: ${sa.studentEmail}`);
+      }
+      if (sa.submittedAt < form.opensAt || sa.submittedAt > form.closesAt) {
+        throw new Error(`submittedAt fora da janela do formulário: ${sa.studentEmail}`);
+      }
+      responses.set(`${sa.formId}::${sa.studentEmail}::${sa.competencyCode}`, sa);
+    }
+    for (const ev of LOTE4_SKILL_EVIDENCES_SEED) {
+      if (!ev.sourceTaskId && !ev.sourceAssessmentId) throw new Error(`Evidência sem origem: ${ev.id}`);
+      if (ev.verifiedLevel < 1 || ev.verifiedLevel > 5) throw new Error(`verifiedLevel inválido: ${ev.id}`);
+      evidences.set(ev.id, ev);
+    }
+    for (const al of LOTE4_ACADEMIC_ALERTS_SEED) {
+      if (al.explainableReason.trim().length < 10) throw new Error(`explainableReason curto: ${al.id}`);
+      alerts.set(al.id, al);
+    }
+    for (const d of LOTE4_EXPLAINABLE_DIAGNOSTICS_SEED) {
+      if (d.selfPerceivedLevel < 1 || d.selfPerceivedLevel > 5 || d.teacherVerifiedLevel < 1 || d.teacherVerifiedLevel > 5) {
+        throw new Error(`Diagnóstico fora da escala 1..5: ${d.id}`);
+      }
+      if (d.explanationText.trim().length < 10 || d.limitationsNote.trim().length < 10) {
+        throw new Error(`Explicação/limitação ausente no diagnóstico: ${d.id}`);
+      }
+      diagnostics.set(d.id, d);
+    }
+    for (const ms of LOTE4_MILESTONES_SEED) {
+      if (ms.title.trim().length < 3) throw new Error(`Título de marco inválido: ${ms.id}`);
+      milestones.set(ms.id, ms);
+    }
+  }
+
+  return {
+    selfAssessmentForms: forms.size,
+    selfAssessments: responses.size,
+    skillEvidences: evidences.size,
+    academicAlerts: alerts.size,
+    explainableDiagnostics: diagnostics.size,
+    milestones: milestones.size,
+  };
+}
+
+// =============================================================================
+// LOTE 5 (DB-041..DB-046): COMUNICAÇÃO OFICIAL, APOIO CONFIDENCIAL & GAMIFICAÇÃO
+// =============================================================================
+
+interface ClassAnnouncementSeed {
+  id: string;
+  classCode: string;
+  classPeriod: string;
+  subjectCode: string | null;
+  authorEmail: string;
+  title: string;
+  content: string;
+  priority: AnnouncementPriority;
+  isPinned: boolean;
+  publishedAt: string;
+  expiresAt: string | null;
+}
+
+interface HelpRequestSeed {
+  id: string;
+  studentEmail: string;
+  classCode: string;
+  classPeriod: string;
+  subjectCode: string;
+  moduleOrderIndex: number | null;
+  assignedTeacherEmail: string | null;
+  category: HelpRequestCategory;
+  subjectTitle: string;
+  description: string;
+  isConfidential: boolean;
+  status: HelpRequestStatus;
+  resolutionSummary: string | null;
+  closedAt: string | null;
+}
+
+interface PedagogicalNoteSeed {
+  id: string;
+  studentEmail: string;
+  classCode: string;
+  classPeriod: string;
+  authorEmail: string;
+  visibilityScope: NoteVisibilityScope;
+  category: NoteCategory;
+  noteContent: string;
+  requiresFollowup: boolean;
+  followupDate: string | null;
+}
+
+interface ChatMessageSeed {
+  id: string;
+  helpRequestId: string;
+  senderEmail: string;
+  messageBody: string;
+  isRead: boolean;
+  readAt: string | null;
+  sentAt: string;
+}
+
+interface GamificationBadgeSeed {
+  code: string;
+  title: string;
+  description: string;
+  criteriaExplanation: string;
+  iconName: string;
+  xpReward: number;
+  competencyCode: string | null;
+  isActive: boolean;
+}
+
+interface StudentAchievementSeed {
+  studentEmail: string;
+  classCode: string;
+  classPeriod: string;
+  badgeCode: string;
+  unlockedAt: string;
+  originReference: string;
+}
+
+const LOTE5_ANNOUNCEMENTS_SEED: ClassAnnouncementSeed[] = [
+  {
+    id: '51000000-0000-4000-8000-000000000001',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    authorEmail: 'instrutor.oficina.demo@senai.nexa.local',
+    title: 'Uso Obrigatório de Óculos de Proteção e Calçado NR-12 na Oficina de Tornearia',
+    content: 'Lembramos a todos os estudantes que a entrada na Oficina de Tornearia 02 exige óculos de proteção incolor, avental e calçado de segurança com biqueira.',
+    priority: 'URGENT',
+    isPinned: true,
+    publishedAt: '2026-03-09T11:00:00Z',
+    expiresAt: '2026-07-10T23:59:00Z',
+  },
+  {
+    id: '51000000-0000-4000-8000-000000000002',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    authorEmail: 'instrutor.teoria.demo@senai.nexa.local',
+    title: 'Horário Extra de Monitoria em Micrômetro Externo e Relógio Comparador',
+    content: 'O Laboratório de Metrologia 01 estará aberto às quintas-feiras das 13h30 às 15h30 para reforço prático de leitura centesimal.',
+    priority: 'IMPORTANT',
+    isPinned: false,
+    publishedAt: '2026-03-14T14:00:00Z',
+    expiresAt: null,
+  },
+  {
+    id: '51000000-0000-4000-8000-000000000003',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: null,
+    authorEmail: 'coordenacao.demo@senai.nexa.local',
+    title: 'Calendário de Avaliações Práticas e Fechamento do 1º Bimestre',
+    content: 'A coordenação pedagógica divulgou o cronograma oficial das bancas práticas de Usinagem e Metrologia para a turma MEC-2026-2.',
+    priority: 'NORMAL',
+    isPinned: true,
+    publishedAt: '2026-08-18T12:00:00Z',
+    expiresAt: null,
+  },
+];
+
+const LOTE5_HELP_REQUESTS_SEED: HelpRequestSeed[] = [
+  {
+    id: '52000000-0000-4000-8000-000000000001',
+    studentEmail: 'estudante.demo03@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-USI-03',
+    moduleOrderIndex: 1,
+    assignedTeacherEmail: 'instrutor.oficina.demo@senai.nexa.local',
+    category: 'PRACTICAL_DIFFICULTY',
+    subjectTitle: 'Dificuldade na centragem da ferramenta de corte no torno paralelo',
+    description: 'Estou errando a altura da ponta da ferramenta no faceamento e gerando ressalto no centro da peça. Gostaria de agendar apoio reservado na bancada.',
+    isConfidential: true,
+    status: 'IN_PROGRESS',
+    resolutionSummary: null,
+    closedAt: null,
+  },
+  {
+    id: '52000000-0000-4000-8000-000000000002',
+    studentEmail: 'estudante.demo14@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    subjectCode: 'UC-MET-01',
+    moduleOrderIndex: 2,
+    assignedTeacherEmail: 'instrutor.teoria.demo@senai.nexa.local',
+    category: 'TECHNICAL_DOUBT',
+    subjectTitle: 'Dúvida na leitura de meio milímetro no tambor do micrômetro',
+    description: 'Confundo quando somar 0,50mm na bainha do micrômetro externo durante a inspeção de eixos H7.',
+    isConfidential: true,
+    status: 'RESOLVED',
+    resolutionSummary: 'Realizada demonstração individual de 20 minutos com calibrador padrão de 25mm e lista de 10 leituras validadas.',
+    closedAt: null,
+  },
+  {
+    id: '52000000-0000-4000-8000-000000000003',
+    studentEmail: 'estudante.demo29@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    subjectCode: 'UC-SEG-04',
+    moduleOrderIndex: 2,
+    assignedTeacherEmail: 'coordenacao.demo@senai.nexa.local',
+    category: 'PERSONAL_PEDAGOGICAL',
+    subjectTitle: 'Reposição de aula prática por mudança de escala no trabalho',
+    description: 'Tive alteração temporária de turno na empresa e preciso alinhar reposição para não ultrapassar o limite de 25% de faltas.',
+    isConfidential: true,
+    status: 'CLOSED',
+    resolutionSummary: 'Plano de reposição homologado pela coordenação com assinatura de termo e reagendamento para sábado letivo.',
+    closedAt: '2026-09-12T17:30:00Z',
+  },
+];
+
+const LOTE5_PEDAGOGICAL_NOTES_SEED: PedagogicalNoteSeed[] = [
+  {
+    id: '53000000-0000-4000-8000-000000000001',
+    studentEmail: 'estudante.demo03@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    authorEmail: 'instrutor.oficina.demo@senai.nexa.local',
+    visibilityScope: 'TEACHERS_AND_COORD',
+    category: 'INTERVENTION',
+    noteContent: 'Plano de intervenção prática iniciado após divergência entre autoavaliação e tolerância atingida no eixo escalonado.',
+    requiresFollowup: true,
+    followupDate: '2026-04-10',
+  },
+  {
+    id: '53000000-0000-4000-8000-000000000002',
+    studentEmail: 'estudante.demo29@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    authorEmail: 'coordenacao.demo@senai.nexa.local',
+    visibilityScope: 'COORDINATION_ONLY',
+    category: 'ACCOMMODATION',
+    noteContent: 'Acompanhamento de frequência com empresa parceira SENAI para adequação de horário sem prejuízo pedagógico.',
+    requiresFollowup: true,
+    followupDate: '2026-09-25',
+  },
+];
+
+const LOTE5_CHAT_MESSAGES_SEED: ChatMessageSeed[] = [
+  {
+    id: '54000000-0000-4000-8000-000000000001',
+    helpRequestId: '52000000-0000-4000-8000-000000000001',
+    senderEmail: 'estudante.demo03@aluno.nexa.local',
+    messageBody: 'Professor, posso passar amanhã às 13h30 na oficina para treinar o zeramento da ferramenta no contraponto?',
+    isRead: true,
+    readAt: '2026-03-19T14:05:00Z',
+    sentAt: '2026-03-19T13:50:00Z',
+  },
+  {
+    id: '54000000-0000-4000-8000-000000000002',
+    helpRequestId: '52000000-0000-4000-8000-000000000001',
+    senderEmail: 'instrutor.oficina.demo@senai.nexa.local',
+    messageBody: 'Combinado! Separei o Torno 04 para revisarmos juntos a centragem com calços e o faceamento passo a passo.',
+    isRead: false,
+    readAt: null,
+    sentAt: '2026-03-19T14:12:00Z',
+  },
+  {
+    id: '54000000-0000-4000-8000-000000000003',
+    helpRequestId: '52000000-0000-4000-8000-000000000002',
+    senderEmail: 'instrutor.teoria.demo@senai.nexa.local',
+    messageBody: 'Ótima evolução na bateria de leituras de hoje! Todas as 10 medições ficaram dentro de ±0,01mm.',
+    isRead: true,
+    readAt: '2026-03-15T16:40:00Z',
+    sentAt: '2026-03-15T16:20:00Z',
+  },
+];
+
+// 6 Conquistas Técnicas Transparentes SENAI (DB-045 DoD)
+const LOTE5_GAMIFICATION_BADGES_SEED: GamificationBadgeSeed[] = [
+  {
+    code: 'BADGE-METROLOGIA-100',
+    title: 'Mestre do Micrômetro',
+    description: 'Domínio comprovado na leitura centesimal com micrômetro externo e inspeção dimensional H7.',
+    criteriaExplanation: 'Alcançar nível verificado >= 4.50 nas competências de Paquímetro ou Micrômetro em avaliações práticas validadas pelo instrutor.',
+    iconName: 'micrometer-precision',
+    xpReward: 150,
+    competencyCode: 'COMP-MET-02',
+    isActive: true,
+  },
+  {
+    code: 'BADGE-PAQUIMETRO-PRO',
+    title: 'Olho de Precisão H7',
+    description: 'Excelência no uso de paquímetro universal com resolução 0,02mm sem desvios de leitura.',
+    criteriaExplanation: 'Concluir a tarefa prática de Inspeção Dimensional com nota >= 9.00 e evidência verificada na competência COMP-MET-01.',
+    iconName: 'caliper-check',
+    xpReward: 120,
+    competencyCode: 'COMP-MET-01',
+    isActive: true,
+  },
+  {
+    code: 'BADGE-TORNEARIA-EXACT',
+    title: 'Especialista em Tornearia Cilíndrica',
+    description: 'Usinagem de eixo escalonado dentro da tolerância ±0,02mm e acabamento conforme desenho técnico.',
+    criteriaExplanation: 'Atingir nível >= 4 em todos os critérios técnicos da rubrica de Torneamento Cilíndrico Externo (COMP-USI-02).',
+    iconName: 'lathe-master',
+    xpReward: 200,
+    competencyCode: 'COMP-USI-02',
+    isActive: true,
+  },
+  {
+    code: 'BADGE-SEGURANCA-NR12',
+    title: 'Guardião NR-12 & 5S',
+    description: 'Conduta exemplar de segurança industrial, bloqueio LOTO, uso integral de EPIs e bancada 5S.',
+    criteriaExplanation: 'Manter 100% de conformidade nos checklists de EPI e segurança NR-12 em todas as práticas avaliadas do semestre.',
+    iconName: 'shield-nr12',
+    xpReward: 180,
+    competencyCode: 'COMP-SEG-01',
+    isActive: true,
+  },
+  {
+    code: 'BADGE-ASSIDUIDADE-100',
+    title: 'Presença de Aço 100%',
+    description: 'Assiduidade integral em aulas teóricas e oficinas práticas durante todo o módulo.',
+    criteriaExplanation: 'Registrar 100% de presença efetiva (zero faltas não justificadas) em todas as aulas ministradas do ciclo.',
+    iconName: 'calendar-medal',
+    xpReward: 100,
+    competencyCode: null,
+    isActive: true,
+  },
+  {
+    code: 'BADGE-AUTOCONHECIMENTO-360',
+    title: 'Calibração Metacognitiva',
+    description: 'Alinhamento consistente entre autoavaliação discente e evidências práticas verificadas.',
+    criteriaExplanation: 'Responder aos formulários de autoavaliação dentro do prazo com discrepância absoluta <= 0.50 frente à avaliação docente.',
+    iconName: 'compass-aligned',
+    xpReward: 130,
+    competencyCode: null,
+    isActive: true,
+  },
+];
+
+const LOTE5_STUDENT_ACHIEVEMENTS_SEED: StudentAchievementSeed[] = [
+  {
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    badgeCode: 'BADGE-PAQUIMETRO-PRO',
+    unlockedAt: '2026-02-22T18:00:00Z',
+    originReference: 'Tarefa: Inspeção Dimensional de Pino Calibrado (Nota 9.60)',
+  },
+  {
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    badgeCode: 'BADGE-METROLOGIA-100',
+    unlockedAt: '2026-03-02T17:15:00Z',
+    originReference: 'Módulo 02: Metrologia com Micrômetro (Nível verificado 4.90)',
+  },
+  {
+    studentEmail: 'estudante.demo01@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    badgeCode: 'BADGE-ASSIDUIDADE-100',
+    unlockedAt: '2026-03-26T20:00:00Z',
+    originReference: 'Ciclo 2026.1: 25h/25h (100.00% de presença)',
+  },
+  {
+    studentEmail: 'estudante.demo02@aluno.nexa.local',
+    classCode: 'MEC-2026-1',
+    classPeriod: '2026.1',
+    badgeCode: 'BADGE-TORNEARIA-EXACT',
+    unlockedAt: '2026-03-24T19:10:00Z',
+    originReference: 'Tarefa: Usinagem de Eixo Escalonado Ø25mm (Nível 5)',
+  },
+  {
+    studentEmail: 'estudante.demo04@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    badgeCode: 'BADGE-SEGURANCA-NR12',
+    unlockedAt: '2026-09-08T18:30:00Z',
+    originReference: 'Oficina Integrada SENAI: 100% conformidade EPI/NR-12',
+  },
+  {
+    studentEmail: 'estudante.demo04@aluno.nexa.local',
+    classCode: 'MEC-2026-2',
+    classPeriod: '2026.2',
+    badgeCode: 'BADGE-AUTOCONHECIMENTO-360',
+    unlockedAt: '2026-09-15T19:00:00Z',
+    originReference: 'Diagnóstico 360° Alinhado (gap 0.10)',
+  },
+];
+
+function buildLote5IdempotentSeedSql(): string {
+  const lines: string[] = [
+    '-- =============================================================================',
+    '-- PROJETO NEXA — SEED IDEMPOTENTE DO LOTE 5: COMUNICAÇÃO & GAMIFICAÇÃO (DB-045)',
+    '-- SGBD: PostgreSQL 16 (UPSERT via ON CONFLICT DO UPDATE)',
+    '-- Popula conquistas técnicas SENAI (gamification_badges), conquistas de alunos,',
+    '-- avisos de mural, solicitações confidenciais, notas pedagógicas e mensagens.',
+    '-- =============================================================================',
+    '',
+    'BEGIN;',
+    '',
+    '-- 1. Mural de Avisos da Turma (class_announcements — DB-041)',
+  ];
+
+  for (const ann of LOTE5_ANNOUNCEMENTS_SEED) {
+    const subjJoin = ann.subjectCode ? `JOIN subjects s ON s.code = ${sqlLiteral(ann.subjectCode)}` : '';
+    const subjExpr = ann.subjectCode ? 's.id' : 'NULL';
+    const expExpr = ann.expiresAt ? `TIMESTAMPTZ ${sqlLiteral(ann.expiresAt)}` : 'NULL';
+    lines.push(
+      `INSERT INTO class_announcements (id, class_id, subject_id, author_id, title, content, priority, is_pinned, published_at, expires_at)`,
+      `SELECT ${sqlLiteral(ann.id)}::uuid, cl.id, ${subjExpr}, u.id, ${sqlLiteral(ann.title)}, ${sqlLiteral(ann.content)}, ${sqlLiteral(ann.priority)}::announcement_priority_enum, ${ann.isPinned ? 'TRUE' : 'FALSE'}, TIMESTAMPTZ ${sqlLiteral(ann.publishedAt)}, ${expExpr}`,
+      `FROM classes cl`,
+      ...(subjJoin ? [subjJoin] : []),
+      `JOIN users u ON u.email = ${sqlLiteral(ann.authorEmail)}`,
+      `WHERE cl.code = ${sqlLiteral(ann.classCode)} AND cl.period = ${sqlLiteral(ann.classPeriod)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET title = EXCLUDED.title, content = EXCLUDED.content, priority = EXCLUDED.priority, is_pinned = EXCLUDED.is_pinned;`,
+      ''
+    );
+  }
+
+  lines.push('-- 2. Solicitações Confidenciais de Apoio (help_requests — DB-042)');
+  for (const hr of LOTE5_HELP_REQUESTS_SEED) {
+    const modJoin = hr.moduleOrderIndex !== null ? `JOIN learning_modules lm ON lm.subject_id = s.id AND lm.order_index = ${hr.moduleOrderIndex}` : '';
+    const modExpr = hr.moduleOrderIndex !== null ? 'lm.id' : 'NULL';
+    const teacherJoin = hr.assignedTeacherEmail ? `JOIN users t ON t.email = ${sqlLiteral(hr.assignedTeacherEmail)}` : '';
+    const teacherExpr = hr.assignedTeacherEmail ? 't.id' : 'NULL';
+    const closedExpr = hr.closedAt ? `TIMESTAMPTZ ${sqlLiteral(hr.closedAt)}` : 'NULL';
+    lines.push(
+      `INSERT INTO help_requests (id, student_id, enrollment_id, subject_id, module_id, assigned_teacher_id, category, subject_title, description, is_confidential, status, resolution_summary, closed_at)`,
+      `SELECT ${sqlLiteral(hr.id)}::uuid, u.id, e.id, s.id, ${modExpr}, ${teacherExpr}, ${sqlLiteral(hr.category)}::help_request_category_enum, ${sqlLiteral(hr.subjectTitle)}, ${sqlLiteral(hr.description)}, ${hr.isConfidential ? 'TRUE' : 'FALSE'}, ${sqlLiteral(hr.status)}::help_request_status_enum, ${sqlLiteral(hr.resolutionSummary)}, ${closedExpr}`,
+      `FROM users u`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(hr.classCode)} AND cl.period = ${sqlLiteral(hr.classPeriod)}`,
+      `JOIN enrollments e ON e.student_id = u.id AND e.class_id = cl.id`,
+      `JOIN subjects s ON s.code = ${sqlLiteral(hr.subjectCode)}`,
+      ...(modJoin ? [modJoin] : []),
+      ...(teacherJoin ? [teacherJoin] : []),
+      `WHERE u.email = ${sqlLiteral(hr.studentEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET status = EXCLUDED.status, resolution_summary = EXCLUDED.resolution_summary, closed_at = EXCLUDED.closed_at;`,
+      ''
+    );
+  }
+
+  lines.push('-- 3. Observações Pedagógicas Restritas (pedagogical_notes — DB-043)');
+  for (const pn of LOTE5_PEDAGOGICAL_NOTES_SEED) {
+    const fupExpr = pn.followupDate ? `DATE ${sqlLiteral(pn.followupDate)}` : 'NULL';
+    lines.push(
+      `INSERT INTO pedagogical_notes (id, student_id, enrollment_id, author_id, visibility_scope, category, note_content, requires_followup, followup_date)`,
+      `SELECT ${sqlLiteral(pn.id)}::uuid, u.id, e.id, a.id, ${sqlLiteral(pn.visibilityScope)}::note_visibility_scope_enum, ${sqlLiteral(pn.category)}::note_category_enum, ${sqlLiteral(pn.noteContent)}, ${pn.requiresFollowup ? 'TRUE' : 'FALSE'}, ${fupExpr}`,
+      `FROM users u`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(pn.classCode)} AND cl.period = ${sqlLiteral(pn.classPeriod)}`,
+      `JOIN enrollments e ON e.student_id = u.id AND e.class_id = cl.id`,
+      `JOIN users a ON a.email = ${sqlLiteral(pn.authorEmail)}`,
+      `WHERE u.email = ${sqlLiteral(pn.studentEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET visibility_scope = EXCLUDED.visibility_scope, note_content = EXCLUDED.note_content, requires_followup = EXCLUDED.requires_followup, followup_date = EXCLUDED.followup_date;`,
+      ''
+    );
+  }
+
+  lines.push('-- 4. Mensagens Privadas em Chamados de Apoio (chat_messages — DB-044)');
+  for (const cm of LOTE5_CHAT_MESSAGES_SEED) {
+    const readAtExpr = cm.readAt ? `TIMESTAMPTZ ${sqlLiteral(cm.readAt)}` : 'NULL';
+    lines.push(
+      `INSERT INTO chat_messages (id, help_request_id, sender_id, message_body, is_read, read_at, sent_at)`,
+      `SELECT ${sqlLiteral(cm.id)}::uuid, ${sqlLiteral(cm.helpRequestId)}::uuid, u.id, ${sqlLiteral(cm.messageBody)}, ${cm.isRead ? 'TRUE' : 'FALSE'}, ${readAtExpr}, TIMESTAMPTZ ${sqlLiteral(cm.sentAt)}`,
+      `FROM users u WHERE u.email = ${sqlLiteral(cm.senderEmail)}`,
+      `ON CONFLICT (id) DO UPDATE`,
+      `SET is_read = EXCLUDED.is_read, read_at = EXCLUDED.read_at;`,
+      ''
+    );
+  }
+
+  lines.push('-- 5. Catálogo Transparente de Conquistas SENAI (gamification_badges — DB-045)');
+  for (const bg of LOTE5_GAMIFICATION_BADGES_SEED) {
+    const compJoin = bg.competencyCode ? `LEFT JOIN competencies cp ON cp.code = ${sqlLiteral(bg.competencyCode)}` : '';
+    const compExpr = bg.competencyCode ? 'cp.id' : 'NULL';
+    const fromClause = bg.competencyCode ? `FROM (SELECT 1) AS _seed ${compJoin}` : '';
+    lines.push(
+      `INSERT INTO gamification_badges (code, title, description, criteria_explanation, icon_name, xp_reward, competency_id, is_active)`,
+      bg.competencyCode
+        ? `SELECT ${sqlLiteral(bg.code)}, ${sqlLiteral(bg.title)}, ${sqlLiteral(bg.description)}, ${sqlLiteral(bg.criteriaExplanation)}, ${sqlLiteral(bg.iconName)}, ${bg.xpReward}, ${compExpr}, ${bg.isActive ? 'TRUE' : 'FALSE'} ${fromClause}`
+        : `VALUES (${sqlLiteral(bg.code)}, ${sqlLiteral(bg.title)}, ${sqlLiteral(bg.description)}, ${sqlLiteral(bg.criteriaExplanation)}, ${sqlLiteral(bg.iconName)}, ${bg.xpReward}, NULL, ${bg.isActive ? 'TRUE' : 'FALSE'})`,
+      `ON CONFLICT (code) DO UPDATE`,
+      `SET title = EXCLUDED.title, description = EXCLUDED.description, criteria_explanation = EXCLUDED.criteria_explanation, icon_name = EXCLUDED.icon_name, xp_reward = EXCLUDED.xp_reward, is_active = EXCLUDED.is_active;`,
+      ''
+    );
+  }
+
+  lines.push('-- 6. Conquistas Desbloqueadas pelos Estudantes (student_achievements — DB-046)');
+  for (const ach of LOTE5_STUDENT_ACHIEVEMENTS_SEED) {
+    lines.push(
+      `INSERT INTO student_achievements (student_id, enrollment_id, badge_id, unlocked_at, origin_reference)`,
+      `SELECT u.id, e.id, b.id, TIMESTAMPTZ ${sqlLiteral(ach.unlockedAt)}, ${sqlLiteral(ach.originReference)}`,
+      `FROM users u`,
+      `JOIN classes cl ON cl.code = ${sqlLiteral(ach.classCode)} AND cl.period = ${sqlLiteral(ach.classPeriod)}`,
+      `JOIN enrollments e ON e.student_id = u.id AND e.class_id = cl.id`,
+      `JOIN gamification_badges b ON b.code = ${sqlLiteral(ach.badgeCode)}`,
+      `WHERE u.email = ${sqlLiteral(ach.studentEmail)}`,
+      `ON CONFLICT (student_id, badge_id) DO UPDATE`,
+      `SET unlocked_at = EXCLUDED.unlocked_at, origin_reference = EXCLUDED.origin_reference;`,
+      ''
+    );
+  }
+
+  lines.push('COMMIT;', '');
+  return lines.join('\n');
+}
+
+function validateAndSimulateLote5Seed(): {
+  announcements: number;
+  helpRequests: number;
+  pedagogicalNotes: number;
+  chatMessages: number;
+  badges: number;
+  achievements: number;
+} {
+  const announcements = new Map<string, ClassAnnouncementSeed>();
+  const helpRequests = new Map<string, HelpRequestSeed>();
+  const notes = new Map<string, PedagogicalNoteSeed>();
+  const messages = new Map<string, ChatMessageSeed>();
+  const badges = new Map<string, GamificationBadgeSeed>();
+  const achievements = new Map<string, StudentAchievementSeed>();
+
+  for (let pass = 1; pass <= 2; pass++) {
+    for (const a of LOTE5_ANNOUNCEMENTS_SEED) {
+      if (a.title.trim().length < 3 || a.content.trim().length < 5) throw new Error(`Aviso inválido: ${a.id}`);
+      announcements.set(a.id, a);
+    }
+    for (const hr of LOTE5_HELP_REQUESTS_SEED) {
+      if (!hr.isConfidential) throw new Error(`HelpRequest deve preservar sigilo padrão: ${hr.id}`);
+      if (hr.status === 'CLOSED' && !hr.closedAt) throw new Error(`HelpRequest CLOSED sem closedAt: ${hr.id}`);
+      helpRequests.set(hr.id, hr);
+    }
+    for (const pn of LOTE5_PEDAGOGICAL_NOTES_SEED) {
+      if (pn.noteContent.trim().length < 5) throw new Error(`Observação pedagógica curta: ${pn.id}`);
+      notes.set(pn.id, pn);
+    }
+    for (const cm of LOTE5_CHAT_MESSAGES_SEED) {
+      if (!helpRequests.has(cm.helpRequestId)) throw new Error(`ChatMessage órfã: ${cm.id}`);
+      if (cm.isRead && !cm.readAt) throw new Error(`ChatMessage lida sem readAt: ${cm.id}`);
+      messages.set(cm.id, cm);
+    }
+    for (const b of LOTE5_GAMIFICATION_BADGES_SEED) {
+      if (b.xpReward <= 0 || b.criteriaExplanation.trim().length < 15) {
+        throw new Error(`Badge inválido: ${b.code}`);
+      }
+      badges.set(b.code, b);
+    }
+    for (const ach of LOTE5_STUDENT_ACHIEVEMENTS_SEED) {
+      if (!badges.has(ach.badgeCode)) throw new Error(`Conquista referencia badge inexistente: ${ach.badgeCode}`);
+      achievements.set(`${ach.studentEmail}::${ach.badgeCode}`, ach);
+    }
+  }
+
+  return {
+    announcements: announcements.size,
+    helpRequests: helpRequests.size,
+    pedagogicalNotes: notes.size,
+    chatMessages: messages.size,
+    badges: badges.size,
+    achievements: achievements.size,
+  };
+}
+
 function main(): void {
+  const startedAt: number = Date.now();
   console.log('======================================================================');
-  console.log('🌱 [DB-020 / DB-030] NEXA DB SEED — ESTRUTURA CURRICULAR + LOTE 3');
+  console.log('🌱 [DB-020 / DB-030 / DB-040] NEXA DB SEED — LOTES 2, 3 E 4');
   console.log('======================================================================\n');
 
   const counts = validateAndSimulateIdempotentSeed();
@@ -1884,10 +3203,16 @@ function main(): void {
   const lote3Datasets = buildLote3OperationalDatasets();
   const lote3Counts = validateAndSimulateLote3Seed(lote3Datasets);
   const lote3SeedSql: string = buildLote3IdempotentSeedSql(lote3Datasets);
+  const lote4Counts = validateAndSimulateLote4Seed();
+  const lote4SeedSql: string = buildLote4IdempotentSeedSql();
+  const lote5Counts = validateAndSimulateLote5Seed();
+  const lote5SeedSql: string = buildLote5IdempotentSeedSql();
 
   fs.mkdirSync(path.dirname(SEED_SQL_PATH), { recursive: true });
   fs.writeFileSync(SEED_SQL_PATH, seedSql, 'utf8');
   fs.writeFileSync(SEED_LOTE3_SQL_PATH, lote3SeedSql, 'utf8');
+  fs.writeFileSync(SEED_LOTE4_SQL_PATH, lote4SeedSql, 'utf8');
+  fs.writeFileSync(SEED_LOTE5_SQL_PATH, lote5SeedSql, 'utf8');
 
   const env = loadEnvVars();
   const containerName: string = env.POSTGRES_CONTAINER_NAME || 'nexa-postgres';
@@ -1895,24 +3220,22 @@ function main(): void {
   const dbName: string = env.POSTGRES_DB || 'nexa_senai_db';
 
   if (isPostgresContainerRunning(containerName)) {
-    console.log(`🐳 Container '${containerName}' ativo! Aplicando seeds idempotentes (DB-020 + DB-030) no PostgreSQL 16...`);
-    execSync(`docker exec -i ${containerName} psql -v ON_ERROR_STOP=1 -U ${dbUser} -d ${dbName}`, {
-      cwd: ROOT_DIR,
-      input: seedSql,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    execSync(`docker exec -i ${containerName} psql -v ON_ERROR_STOP=1 -U ${dbUser} -d ${dbName}`, {
-      cwd: ROOT_DIR,
-      input: lote3SeedSql,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    console.log('  [OK] Seeds DB-020 e DB-030 executados com sucesso no PostgreSQL 16 via psql (idempotentes).');
+    console.log(`🐳 Container '${containerName}' ativo! Aplicando seeds idempotentes (DB-020 + DB-030 + DB-040 + Lote 5) no PostgreSQL 16...`);
+    for (const script of [seedSql, lote3SeedSql, lote4SeedSql, lote5SeedSql]) {
+      execSync(`docker exec -i ${containerName} psql -v ON_ERROR_STOP=1 -U ${dbUser} -d ${dbName}`, {
+        cwd: ROOT_DIR,
+        input: script,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+    console.log('  [OK] Seeds DB-020, DB-030, DB-040 e Lote 5 executados com sucesso no PostgreSQL 16 via psql (idempotentes).');
   } else {
     console.log(`ℹ️  Container '${containerName}' offline — modo de validação/simulação idempotente (2 passagens UPSERT):`);
     console.log(`  [OK] Script SQL Lote 2 sincronizado em: ${path.relative(ROOT_DIR, SEED_SQL_PATH)}`);
     console.log(`  [OK] Script SQL Lote 3 sincronizado em: ${path.relative(ROOT_DIR, SEED_LOTE3_SQL_PATH)}`);
+    console.log(`  [OK] Script SQL Lote 4 sincronizado em: ${path.relative(ROOT_DIR, SEED_LOTE4_SQL_PATH)}`);
+    console.log(`  [OK] Script SQL Lote 5 sincronizado em: ${path.relative(ROOT_DIR, SEED_LOTE5_SQL_PATH)}`);
   }
 
   console.log('\n📊 Resumo da Grade Curricular SENAI (DB-020 — 100% Dados Fictícios Anônimos):');
@@ -1937,8 +3260,27 @@ function main(): void {
   console.log(`  • Avaliações Formativas (assessments):       ${lote3Counts.academicAssessments}`);
   console.log(`  • Notas Parciais (student_grades):           ${lote3Counts.studentGrades}`);
 
+  console.log('\n📊 Resumo de Autoavaliações, Evidências, Alertas e Diagnósticos (DB-040 — Lote 4):');
+  console.log(`  • Formulários Autoavaliação (forms):         ${lote4Counts.selfAssessmentForms}`);
+  console.log(`  • Respostas Autoavaliação (self_evals):      ${lote4Counts.selfAssessments}`);
+  console.log(`  • Evidências Verificadas (skill_evidences):  ${lote4Counts.skillEvidences}`);
+  console.log(`  • Alertas Explicáveis (academic_alerts):     ${lote4Counts.academicAlerts} (LOW, MODERATE, HIGH, CRITICAL)`);
+  console.log(`  • Diagnósticos Comparativos (diagnostics):   ${lote4Counts.explainableDiagnostics} (Metrologia & Tornearia)`);
+  console.log(`  • Marcos Linha do Tempo (milestones):        ${lote4Counts.milestones}`);
+
+  console.log('\n📊 Resumo de Comunicação, Apoio Confidencial & Gamificação SENAI (DB-045 / Lote 5):');
+  console.log(`  • Avisos no Mural (class_announcements):     ${lote5Counts.announcements}`);
+  console.log(`  • Solicitações Apoio (help_requests):        ${lote5Counts.helpRequests} (is_confidential = TRUE)`);
+  console.log(`  • Observações Restritas (pedagogical_notes): ${lote5Counts.pedagogicalNotes}`);
+  console.log(`  • Mensagens Privadas (chat_messages):        ${lote5Counts.chatMessages}`);
+  console.log(`  • Conquistas Técnicas (gamification_badges): ${lote5Counts.badges}`);
+  console.log(`  • Conquistas Alunos (student_achievements):  ${lote5Counts.achievements}`);
+  console.log(`  • Tempo total de execução:                   ${Date.now() - startedAt}ms`);
+
   console.log('\n✅ [DB-020 SUCESSO] Seed curricular SENAI executado de forma idempotente (Exit Code 0)!');
   console.log('✅ [DB-030 SUCESSO] Seed realista de frequências, oficinas e notas parciais executado (Exit Code 0)!');
+  console.log('✅ [DB-040 SUCESSO] Seed de diagnósticos explicáveis, alertas e marcos do Lote 4 executado (Exit Code 0)!');
+  console.log('✅ [LOTE 5 SUCESSO] Seed de comunicação oficial, apoio confidencial e conquistas SENAI executado (Exit Code 0)!');
 }
 
 main();

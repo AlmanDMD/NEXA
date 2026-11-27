@@ -1,0 +1,3715 @@
+{
+  "project": "NEXA — Sistema Inteligente de Monitoramento Acadêmico SENAI",
+  "card": "DB-050",
+  "status": "HOMOLOGATED_50_OF_50",
+  "summary": {
+    "totalTables3fn": 33,
+    "totalPrismaModels": 33,
+    "totalColumns": 300,
+    "totalEnums": 18,
+    "totalViews": 3,
+    "totalMigrations": 41,
+    "totalSeeds": 4,
+    "totalIndexes": 121,
+    "totalTriggers": 40,
+    "rlsProtectedTables": [
+      "student_self_assessments",
+      "help_requests",
+      "pedagogical_notes",
+      "chat_messages"
+    ],
+    "integrityTestsPassed": 7,
+    "integrityTestsTotal": 7
+  },
+  "views": [
+    "vw_student_360_performance",
+    "vw_module_attendance_risk",
+    "vw_self_eval_discrepancy"
+  ],
+  "enums": [
+    {
+      "name": "Role",
+      "pgType": "user_role_enum",
+      "values": [
+        "ADMIN",
+        "COORDINATOR",
+        "TEACHER",
+        "STUDENT"
+      ]
+    },
+    {
+      "name": "EnrollmentStatus",
+      "pgType": "enrollment_status_enum",
+      "values": [
+        "ACTIVE",
+        "COMPLETED",
+        "DROPPED",
+        "SUSPENDED"
+      ]
+    },
+    {
+      "name": "RiskLevel",
+      "pgType": "risk_level_enum",
+      "values": [
+        "LOW",
+        "MODERATE",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    {
+      "name": "SubmissionStatus",
+      "pgType": "submission_status_enum",
+      "values": [
+        "PENDING",
+        "SUBMITTED",
+        "EVALUATED",
+        "LATE"
+      ]
+    },
+    {
+      "name": "HelpRequestStatus",
+      "pgType": "help_request_status_enum",
+      "values": [
+        "OPEN",
+        "IN_PROGRESS",
+        "RESOLVED",
+        "CLOSED"
+      ]
+    },
+    {
+      "name": "Shift",
+      "pgType": "shift_enum",
+      "values": [
+        "MORNING",
+        "AFTERNOON",
+        "NIGHT"
+      ]
+    },
+    {
+      "name": "ClassStatus",
+      "pgType": "class_status_enum",
+      "values": [
+        "PLANNING",
+        "ACTIVE",
+        "COMPLETED",
+        "ARCHIVED"
+      ]
+    },
+    {
+      "name": "CompetencyCategory",
+      "pgType": "competency_category_enum",
+      "values": [
+        "TECHNICAL",
+        "SAFETY",
+        "PROCEDURAL"
+      ]
+    },
+    {
+      "name": "AttendanceStatus",
+      "pgType": "attendance_status_enum",
+      "values": [
+        "PRESENT",
+        "ABSENT",
+        "LATE",
+        "JUSTIFIED"
+      ]
+    },
+    {
+      "name": "AssessmentType",
+      "pgType": "assessment_type_enum",
+      "values": [
+        "EXAM",
+        "MICRO_EVALUATION",
+        "PROJECT"
+      ]
+    },
+    {
+      "name": "AlertCategory",
+      "pgType": "alert_category_enum",
+      "values": [
+        "ATTENDANCE",
+        "GRADE_DROP",
+        "PENDING_TASKS",
+        "SELF_EVAL_GAP"
+      ]
+    },
+    {
+      "name": "AlertStatus",
+      "pgType": "alert_status_enum",
+      "values": [
+        "ACTIVE",
+        "ACKNOWLEDGED",
+        "RESOLVED"
+      ]
+    },
+    {
+      "name": "DiagnosticType",
+      "pgType": "diagnostic_type_enum",
+      "values": [
+        "ALIGNED",
+        "OVERCONFIDENCE_RISK",
+        "UNDERCONFIDENCE_SUPPORT",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "name": "MilestoneType",
+      "pgType": "milestone_type_enum",
+      "values": [
+        "MODULE_COMPLETED",
+        "SKILL_LEVEL_UP",
+        "PERFECT_ATTENDANCE",
+        "RECOVERY_ACHIEVED"
+      ]
+    },
+    {
+      "name": "AnnouncementPriority",
+      "pgType": "announcement_priority_enum",
+      "values": [
+        "NORMAL",
+        "IMPORTANT",
+        "URGENT"
+      ]
+    },
+    {
+      "name": "HelpRequestCategory",
+      "pgType": "help_request_category_enum",
+      "values": [
+        "TECHNICAL_DOUBT",
+        "PRACTICAL_DIFFICULTY",
+        "PERSONAL_PEDAGOGICAL"
+      ]
+    },
+    {
+      "name": "NoteVisibilityScope",
+      "pgType": "note_visibility_scope_enum",
+      "values": [
+        "PRIVATE_AUTHOR",
+        "TEACHERS_AND_COORD",
+        "COORDINATION_ONLY"
+      ]
+    },
+    {
+      "name": "NoteCategory",
+      "pgType": "note_category_enum",
+      "values": [
+        "INTERVENTION",
+        "MENTORING",
+        "BEHAVIORAL",
+        "ACCOMMODATION"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "model": "SchemaMigration",
+      "table": "schema_migrations",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "migrationName",
+          "column": "migration_name",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "checksumSha256",
+          "column": "checksum_sha256",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "executionTimeMs",
+          "column": "execution_time_ms",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "appliedBy",
+          "column": "applied_by",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "appliedAt",
+          "column": "applied_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [],
+      "checkConstraints": [
+        "chk_schema_migrations_exec_time"
+      ],
+      "indexes": [
+        "idx_schema_migrations_applied_at"
+      ],
+      "triggers": [],
+      "hasRls": false
+    },
+    {
+      "model": "User",
+      "table": "users",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "email",
+          "column": "email",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "passwordHash",
+          "column": "password_hash",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "role",
+          "column": "role",
+          "type": "Role",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "isActive",
+          "column": "is_active",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [],
+      "checkConstraints": [
+        "chk_users_email_lowercase",
+        "chk_users_password_hash_not_plaintext"
+      ],
+      "indexes": [
+        "idx_users_email",
+        "idx_users_email_lower",
+        "idx_users_role_is_active",
+        "idx_users_active_role"
+      ],
+      "triggers": [
+        "trg_users_normalize_and_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "UserProfile",
+      "table": "user_profiles",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "userId",
+          "column": "user_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "fullName",
+          "column": "full_name",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "registrationNumber",
+          "column": "registration_number",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "phone",
+          "column": "phone",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "avatarUrl",
+          "column": "avatar_url",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "bio",
+          "column": "bio",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_user_profiles_user"
+      ],
+      "checkConstraints": [
+        "chk_user_profiles_full_name_not_empty",
+        "chk_user_profiles_registration_not_empty"
+      ],
+      "indexes": [
+        "idx_user_profiles_registration_number",
+        "idx_user_profiles_full_name"
+      ],
+      "triggers": [
+        "trg_user_profiles_normalize_and_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "AuthSession",
+      "table": "auth_sessions",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "userId",
+          "column": "user_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "refreshTokenHash",
+          "column": "refresh_token_hash",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "userAgent",
+          "column": "user_agent",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "ipAddress",
+          "column": "ip_address",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "expiresAt",
+          "column": "expires_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isRevoked",
+          "column": "is_revoked",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_auth_sessions_user"
+      ],
+      "checkConstraints": [
+        "chk_auth_sessions_expiration",
+        "chk_auth_sessions_sha256_hash"
+      ],
+      "indexes": [
+        "idx_auth_sessions_refresh_token_hash",
+        "idx_auth_sessions_is_revoked",
+        "idx_auth_sessions_user_revoked_expires",
+        "idx_auth_sessions_active_tokens"
+      ],
+      "triggers": [
+        "trg_auth_sessions_normalize_hash"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "AuditLog",
+      "table": "audit_logs",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "userId",
+          "column": "user_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "action",
+          "column": "action",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "entity",
+          "column": "entity",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "entityId",
+          "column": "entity_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "oldValues",
+          "column": "old_values",
+          "type": "Json",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "newValues",
+          "column": "new_values",
+          "type": "Json",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "ipAddress",
+          "column": "ip_address",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_audit_logs_user"
+      ],
+      "checkConstraints": [
+        "chk_audit_logs_action_not_empty",
+        "chk_audit_logs_entity_not_empty",
+        "chk_audit_logs_entity_id_not_empty"
+      ],
+      "indexes": [
+        "idx_audit_logs_created_at",
+        "idx_audit_logs_entity_reference",
+        "idx_audit_logs_user_created_at",
+        "idx_audit_logs_old_values_gin",
+        "idx_audit_logs_new_values_gin"
+      ],
+      "triggers": [
+        "trg_audit_logs_prevent_delete"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "Course",
+      "table": "courses",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "code",
+          "column": "code",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "name",
+          "column": "name",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "totalHours",
+          "column": "total_hours",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isActive",
+          "column": "is_active",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [],
+      "checkConstraints": [
+        "chk_courses_code_format",
+        "chk_courses_name_not_empty",
+        "chk_courses_total_hours_positive"
+      ],
+      "indexes": [
+        "idx_courses_code",
+        "idx_courses_code_upper",
+        "idx_courses_name",
+        "idx_courses_is_active"
+      ],
+      "triggers": [
+        "trg_courses_normalize_and_touch",
+        "trg_courses_prevent_delete_with_classes"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "Class",
+      "table": "classes",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "courseId",
+          "column": "course_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "code",
+          "column": "code",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "period",
+          "column": "period",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "shift",
+          "column": "shift",
+          "type": "Shift",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "maxStudents",
+          "column": "max_students",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "status",
+          "column": "status",
+          "type": "ClassStatus",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "startDate",
+          "column": "start_date",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "endDate",
+          "column": "end_date",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_classes_course"
+      ],
+      "checkConstraints": [
+        "chk_classes_code_format",
+        "chk_classes_period_not_empty",
+        "chk_classes_max_students",
+        "chk_classes_date_range"
+      ],
+      "indexes": [
+        "idx_classes_course_period",
+        "idx_classes_code_period_upper",
+        "idx_classes_status_period",
+        "idx_classes_shift"
+      ],
+      "triggers": [
+        "trg_classes_normalize_and_touch",
+        "trg_classes_validate_max_students_reduction"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "Subject",
+      "table": "subjects",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "courseId",
+          "column": "course_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "code",
+          "column": "code",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "name",
+          "column": "name",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "workloadHours",
+          "column": "workload_hours",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "syllabus",
+          "column": "syllabus",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isActive",
+          "column": "is_active",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_subjects_course"
+      ],
+      "checkConstraints": [
+        "chk_subjects_code_format",
+        "chk_subjects_name_not_empty",
+        "chk_subjects_workload_positive"
+      ],
+      "indexes": [
+        "idx_subjects_name",
+        "idx_subjects_name_lower",
+        "idx_subjects_course_code_upper",
+        "idx_subjects_course_active"
+      ],
+      "triggers": [
+        "trg_subjects_normalize_and_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "LearningModule",
+      "table": "learning_modules",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "subjectId",
+          "column": "subject_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "orderIndex",
+          "column": "order_index",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "practicalHours",
+          "column": "practical_hours",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleWeight",
+          "column": "module_weight",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "passingScore",
+          "column": "passing_score",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_learning_modules_subject"
+      ],
+      "checkConstraints": [
+        "chk_learning_modules_order_positive",
+        "chk_learning_modules_title_not_empty",
+        "chk_learning_modules_hours_non_negative",
+        "chk_learning_modules_weight_positive",
+        "chk_learning_modules_passing_score"
+      ],
+      "indexes": [
+        "idx_learning_modules_subject_order",
+        "idx_learning_modules_title",
+        "idx_learning_modules_title_lower"
+      ],
+      "triggers": [
+        "trg_learning_modules_normalize_and_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "Competency",
+      "table": "competencies",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "code",
+          "column": "code",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "category",
+          "column": "category",
+          "type": "CompetencyCategory",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [],
+      "checkConstraints": [
+        "chk_competencies_code_format",
+        "chk_competencies_title_not_empty"
+      ],
+      "indexes": [
+        "idx_competencies_code",
+        "idx_competencies_code_upper",
+        "idx_competencies_category",
+        "idx_competencies_title",
+        "idx_competencies_title_lower"
+      ],
+      "triggers": [
+        "trg_competencies_normalize_and_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "ModuleCompetency",
+      "table": "module_competencies",
+      "columns": [
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "competencyId",
+          "column": "competency_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "weight",
+          "column": "weight",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "requiredLevel",
+          "column": "required_level",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_module_competencies_module",
+        "fk_module_competencies_competency"
+      ],
+      "checkConstraints": [
+        "chk_module_competencies_weight",
+        "chk_module_competencies_level"
+      ],
+      "indexes": [
+        "idx_module_competencies_competency",
+        "idx_module_competencies_module_level"
+      ],
+      "triggers": [
+        "trg_module_competencies_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "Enrollment",
+      "table": "enrollments",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentDate",
+          "column": "enrollment_date",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "status",
+          "column": "status",
+          "type": "EnrollmentStatus",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "finalGrade",
+          "column": "final_grade",
+          "type": "Decimal",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "attendanceRate",
+          "column": "attendance_rate",
+          "type": "Decimal",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_enrollments_student",
+        "fk_enrollments_class"
+      ],
+      "checkConstraints": [
+        "chk_enrollments_final_grade",
+        "chk_enrollments_attendance_rate"
+      ],
+      "indexes": [
+        "idx_enrollments_attendance_rate",
+        "idx_enrollments_class_status_attendance",
+        "idx_enrollments_class_status",
+        "idx_enrollments_student_status",
+        "idx_enrollments_active_class_student"
+      ],
+      "triggers": [
+        "trg_enrollments_validate_student_role_and_touch",
+        "trg_enrollments_enforce_class_capacity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "TeacherAssignment",
+      "table": "teacher_assignments",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "teacherId",
+          "column": "teacher_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "subjectId",
+          "column": "subject_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "assignedAt",
+          "column": "assigned_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "isMainTeacher",
+          "column": "is_main_teacher",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_teacher_assignments_teacher",
+        "fk_teacher_assignments_class",
+        "fk_teacher_assignments_subject"
+      ],
+      "checkConstraints": [],
+      "indexes": [
+        "idx_teacher_assignments_teacher_class",
+        "idx_teacher_assignments_class_subject",
+        "idx_teacher_assignments_subject"
+      ],
+      "triggers": [
+        "trg_teacher_assignments_validate_teacher_role"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "ClassLesson",
+      "table": "class_lessons",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "subjectId",
+          "column": "subject_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "teacherId",
+          "column": "teacher_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "lessonDate",
+          "column": "lesson_date",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "workloadHours",
+          "column": "workload_hours",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "topicSummary",
+          "column": "topic_summary",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "labEnvironment",
+          "column": "lab_environment",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_class_lessons_class",
+        "fk_class_lessons_subject",
+        "fk_class_lessons_module",
+        "fk_class_lessons_teacher"
+      ],
+      "checkConstraints": [
+        "chk_class_lessons_workload",
+        "chk_class_lessons_topic_summary_not_blank"
+      ],
+      "indexes": [
+        "idx_class_lessons_class_subject_date",
+        "idx_class_lessons_module",
+        "idx_class_lessons_teacher"
+      ],
+      "triggers": [
+        "trg_class_lessons_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "AttendanceRecord",
+      "table": "attendance_records",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "lessonId",
+          "column": "lesson_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "status",
+          "column": "status",
+          "type": "AttendanceStatus",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "absentHours",
+          "column": "absent_hours",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "justificationNote",
+          "column": "justification_note",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "recordedAt",
+          "column": "recorded_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_attendance_lesson",
+        "fk_attendance_enrollment",
+        "fk_attendance_student"
+      ],
+      "checkConstraints": [
+        "chk_attendance_absent_hours",
+        "chk_attendance_present_zero_absent"
+      ],
+      "indexes": [
+        "idx_attendance_student_status",
+        "idx_attendance_lesson",
+        "idx_attendance_enrollment_status",
+        "idx_attendance_records_enrollment_status",
+        "idx_attendance_records_absences"
+      ],
+      "triggers": [
+        "trg_attendance_records_validate_integrity",
+        "trg_attendance_records_prevent_closed_class"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "PracticalTask",
+      "table": "practical_tasks",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "blueprintUrl",
+          "column": "blueprint_url",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "dueDate",
+          "column": "due_date",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "maxScore",
+          "column": "max_score",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "isMandatory",
+          "column": "is_mandatory",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_practical_tasks_module",
+        "fk_practical_tasks_class"
+      ],
+      "checkConstraints": [
+        "chk_practical_tasks_max_score",
+        "chk_practical_tasks_title_not_blank",
+        "chk_practical_tasks_blueprint_url"
+      ],
+      "indexes": [
+        "idx_practical_tasks_class_due_date",
+        "idx_practical_tasks_module",
+        "idx_practical_tasks_class_mandatory_due"
+      ],
+      "triggers": [
+        "trg_practical_tasks_validate_and_touch"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "TaskCriterion",
+      "table": "task_criteria",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "taskId",
+          "column": "task_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "competencyId",
+          "column": "competency_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "criterionName",
+          "column": "criterion_name",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "weight",
+          "column": "weight",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "minAcceptableLevel",
+          "column": "min_acceptable_level",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_task_criteria_task",
+        "fk_task_criteria_competency"
+      ],
+      "checkConstraints": [
+        "chk_task_criteria_weight",
+        "chk_task_criteria_level",
+        "chk_task_criteria_name_not_blank"
+      ],
+      "indexes": [
+        "idx_task_criteria_task",
+        "idx_task_criteria_competency"
+      ],
+      "triggers": [],
+      "hasRls": false
+    },
+    {
+      "model": "TaskSubmission",
+      "table": "task_submissions",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "taskId",
+          "column": "task_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "status",
+          "column": "status",
+          "type": "SubmissionStatus",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "completedAt",
+          "column": "completed_at",
+          "type": "DateTime",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "evidenceUrl",
+          "column": "evidence_url",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "studentNotes",
+          "column": "student_notes",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "finalTaskScore",
+          "column": "final_task_score",
+          "type": "Decimal",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_task_submissions_task",
+        "fk_task_submissions_student",
+        "fk_task_submissions_enrollment"
+      ],
+      "checkConstraints": [
+        "chk_task_submissions_score",
+        "chk_task_submissions_evidence_url"
+      ],
+      "indexes": [
+        "idx_task_submissions_student_status",
+        "idx_task_submissions_task_status",
+        "idx_task_submissions_enrollment_status",
+        "idx_task_submissions_pending_late"
+      ],
+      "triggers": [
+        "trg_task_submissions_validate_and_touch",
+        "trg_task_submissions_prevent_closed_class"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "SubmissionEvaluation",
+      "table": "submission_evaluations",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "submissionId",
+          "column": "submission_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "criterionId",
+          "column": "criterion_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "evaluatorId",
+          "column": "evaluator_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "achievedLevel",
+          "column": "achieved_level",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "scoreAwarded",
+          "column": "score_awarded",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "technicalFeedback",
+          "column": "technical_feedback",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "evaluatedAt",
+          "column": "evaluated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_submission_evaluations_submission",
+        "fk_submission_evaluations_criterion",
+        "fk_submission_evaluations_evaluator"
+      ],
+      "checkConstraints": [
+        "chk_submission_evaluations_level",
+        "chk_submission_evaluations_score"
+      ],
+      "indexes": [
+        "idx_submission_evaluations_submission",
+        "idx_submission_evaluations_criterion",
+        "idx_submission_evaluations_evaluator"
+      ],
+      "triggers": [
+        "trg_submission_evaluations_validate_integrity",
+        "trg_submission_evaluations_sync_final_score",
+        "trg_submission_evaluations_prevent_closed_class"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "AcademicAssessment",
+      "table": "academic_assessments",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "subjectId",
+          "column": "subject_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "assessmentType",
+          "column": "assessment_type",
+          "type": "AssessmentType",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "weight",
+          "column": "weight",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "applicationDate",
+          "column": "application_date",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "maxGrade",
+          "column": "max_grade",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_assessments_class",
+        "fk_assessments_subject",
+        "fk_assessments_module"
+      ],
+      "checkConstraints": [
+        "chk_assessments_weight_positive",
+        "chk_assessments_max_grade",
+        "chk_assessments_title_not_blank"
+      ],
+      "indexes": [
+        "idx_academic_assessments_class_subject_date",
+        "idx_academic_assessments_application_date",
+        "idx_academic_assessments_module",
+        "idx_academic_assessments_type"
+      ],
+      "triggers": [
+        "trg_academic_assessments_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "StudentGrade",
+      "table": "student_grades",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "assessmentId",
+          "column": "assessment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "recordedBy",
+          "column": "recorded_by",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "gradeValue",
+          "column": "grade_value",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "recoveryGrade",
+          "column": "recovery_grade",
+          "type": "Decimal",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "comments",
+          "column": "comments",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_student_grades_assessment",
+        "fk_student_grades_enrollment",
+        "fk_student_grades_student",
+        "fk_student_grades_recorded_by"
+      ],
+      "checkConstraints": [
+        "chk_student_grades_value",
+        "chk_student_grades_recovery"
+      ],
+      "indexes": [
+        "idx_student_grades_assessment",
+        "idx_student_grades_student",
+        "idx_student_grades_enrollment",
+        "idx_student_grades_recorded_by",
+        "idx_student_grades_assessment_score",
+        "idx_student_grades_enrollment_assessment"
+      ],
+      "triggers": [
+        "trg_student_grades_validate_and_touch",
+        "trg_student_grades_audit_update",
+        "trg_student_grades_prevent_closed_class"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "SelfAssessmentForm",
+      "table": "self_assessment_forms",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "instructions",
+          "column": "instructions",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "opensAt",
+          "column": "opens_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "closesAt",
+          "column": "closes_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isActive",
+          "column": "is_active",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdBy",
+          "column": "created_by",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_self_assessment_forms_module",
+        "fk_self_assessment_forms_class",
+        "fk_self_assessment_forms_creator"
+      ],
+      "checkConstraints": [
+        "chk_self_assessment_forms_dates",
+        "chk_self_assessment_forms_title_not_blank"
+      ],
+      "indexes": [
+        "idx_self_assessment_forms_class_active",
+        "idx_self_assessment_forms_window",
+        "idx_self_assessment_forms_module",
+        "idx_self_assessment_forms_creator"
+      ],
+      "triggers": [
+        "trg_self_assessment_forms_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "StudentSelfAssessment",
+      "table": "student_self_assessments",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "formId",
+          "column": "form_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "competencyId",
+          "column": "competency_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "perceivedLevel",
+          "column": "perceived_level",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "confidenceScore",
+          "column": "confidence_score",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "difficultyNotes",
+          "column": "difficulty_notes",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "submittedAt",
+          "column": "submitted_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_student_self_assessments_form",
+        "fk_student_self_assessments_student",
+        "fk_student_self_assessments_competency"
+      ],
+      "checkConstraints": [
+        "chk_self_assessments_perceived",
+        "chk_self_assessments_confidence"
+      ],
+      "indexes": [
+        "idx_student_self_assessments_student_competency",
+        "idx_student_self_assessments_form_student",
+        "idx_student_self_assessments_competency"
+      ],
+      "triggers": [
+        "trg_student_self_assessments_validate_integrity"
+      ],
+      "hasRls": true
+    },
+    {
+      "model": "SkillEvidence",
+      "table": "skill_evidences",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "competencyId",
+          "column": "competency_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "sourceSubmissionId",
+          "column": "source_submission_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "sourceAssessmentId",
+          "column": "source_assessment_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "verifiedLevel",
+          "column": "verified_level",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "verifiedBy",
+          "column": "verified_by",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "recordedAt",
+          "column": "recorded_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_skill_evidences_student",
+        "fk_skill_evidences_competency",
+        "fk_skill_evidences_submission",
+        "fk_skill_evidences_assessment",
+        "fk_skill_evidences_verifier"
+      ],
+      "checkConstraints": [
+        "chk_skill_evidences_level",
+        "chk_skill_evidences_source"
+      ],
+      "indexes": [
+        "idx_skill_evidences_student_competency",
+        "idx_skill_evidences_student_recorded",
+        "idx_skill_evidences_source_submission",
+        "idx_skill_evidences_source_assessment",
+        "idx_skill_evidences_verified_by"
+      ],
+      "triggers": [
+        "trg_skill_evidences_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "AcademicAlert",
+      "table": "academic_alerts",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "riskLevel",
+          "column": "risk_level",
+          "type": "RiskLevel",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "alertCategory",
+          "column": "alert_category",
+          "type": "AlertCategory",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "explainableReason",
+          "column": "explainable_reason",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "metricSnapshot",
+          "column": "metric_snapshot",
+          "type": "Json",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "status",
+          "column": "status",
+          "type": "AlertStatus",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "resolvedBy",
+          "column": "resolved_by",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "resolutionNotes",
+          "column": "resolution_notes",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_academic_alerts_student",
+        "fk_academic_alerts_enrollment",
+        "fk_academic_alerts_class",
+        "fk_academic_alerts_module",
+        "fk_academic_alerts_resolver"
+      ],
+      "checkConstraints": [
+        "chk_academic_alerts_reason_not_empty",
+        "chk_academic_alerts_metric_snapshot_object"
+      ],
+      "indexes": [
+        "idx_academic_alerts_class_status_risk",
+        "idx_academic_alerts_student_status",
+        "idx_academic_alerts_enrollment_status",
+        "idx_academic_alerts_module",
+        "idx_academic_alerts_metric_snapshot_gin",
+        "idx_academic_alerts_class_risk_level",
+        "idx_academic_alerts_active_priority"
+      ],
+      "triggers": [
+        "trg_academic_alerts_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "ExplainableDiagnostic",
+      "table": "explainable_diagnostics",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "competencyId",
+          "column": "competency_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "selfPerceivedLevel",
+          "column": "self_perceived_level",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "teacherVerifiedLevel",
+          "column": "teacher_verified_level",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "discrepancyGap",
+          "column": "discrepancy_gap",
+          "type": "Decimal",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "diagnosticType",
+          "column": "diagnostic_type",
+          "type": "DiagnosticType",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "explanationText",
+          "column": "explanation_text",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "limitationsNote",
+          "column": "limitations_note",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "recommendedAction",
+          "column": "recommended_action",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "generatedAt",
+          "column": "generated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_diagnostics_student",
+        "fk_diagnostics_class",
+        "fk_diagnostics_module",
+        "fk_diagnostics_competency"
+      ],
+      "checkConstraints": [
+        "chk_diagnostics_self_level",
+        "chk_diagnostics_teacher_level",
+        "chk_diagnostics_gap_range",
+        "chk_diagnostics_explanation_not_empty",
+        "chk_diagnostics_limitations_not_empty",
+        "chk_diagnostics_action_not_empty"
+      ],
+      "indexes": [
+        "idx_explainable_diagnostics_class_type",
+        "idx_explainable_diagnostics_student_module",
+        "idx_explainable_diagnostics_competency"
+      ],
+      "triggers": [
+        "trg_explainable_diagnostics_compute_and_validate"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "StudentMilestoneHistory",
+      "table": "student_milestone_history",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "milestoneType",
+          "column": "milestone_type",
+          "type": "MilestoneType",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "metadata",
+          "column": "metadata",
+          "type": "Json",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "achievedAt",
+          "column": "achieved_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_milestone_history_student",
+        "fk_milestone_history_enrollment",
+        "fk_milestone_history_module"
+      ],
+      "checkConstraints": [
+        "chk_milestone_history_title_not_empty",
+        "chk_milestone_history_metadata_object"
+      ],
+      "indexes": [
+        "idx_milestone_history_student_achieved",
+        "idx_milestone_history_enrollment_achieved",
+        "idx_milestone_history_module",
+        "idx_milestone_history_type"
+      ],
+      "triggers": [
+        "trg_student_milestone_history_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "ClassAnnouncement",
+      "table": "class_announcements",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "classId",
+          "column": "class_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "subjectId",
+          "column": "subject_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "authorId",
+          "column": "author_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "content",
+          "column": "content",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "priority",
+          "column": "priority",
+          "type": "AnnouncementPriority",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "isPinned",
+          "column": "is_pinned",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "publishedAt",
+          "column": "published_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "expiresAt",
+          "column": "expires_at",
+          "type": "DateTime",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        }
+      ],
+      "foreignKeys": [
+        "fk_announcements_class",
+        "fk_announcements_subject",
+        "fk_announcements_author"
+      ],
+      "checkConstraints": [
+        "chk_announcements_title_not_empty",
+        "chk_announcements_content_not_empty",
+        "chk_announcements_expiration"
+      ],
+      "indexes": [
+        "idx_class_announcements_feed",
+        "idx_class_announcements_priority",
+        "idx_class_announcements_author",
+        "idx_class_announcements_pinned"
+      ],
+      "triggers": [
+        "trg_class_announcements_validate_integrity"
+      ],
+      "hasRls": false
+    },
+    {
+      "model": "HelpRequest",
+      "table": "help_requests",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "subjectId",
+          "column": "subject_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "moduleId",
+          "column": "module_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "assignedTeacherId",
+          "column": "assigned_teacher_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "category",
+          "column": "category",
+          "type": "HelpRequestCategory",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "subjectTitle",
+          "column": "subject_title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isConfidential",
+          "column": "is_confidential",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "status",
+          "column": "status",
+          "type": "HelpRequestStatus",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "resolutionSummary",
+          "column": "resolution_summary",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "closedAt",
+          "column": "closed_at",
+          "type": "DateTime",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        }
+      ],
+      "foreignKeys": [
+        "fk_help_requests_student",
+        "fk_help_requests_enrollment",
+        "fk_help_requests_subject",
+        "fk_help_requests_module",
+        "fk_help_requests_teacher"
+      ],
+      "checkConstraints": [
+        "chk_help_requests_title_not_empty",
+        "chk_help_requests_desc_not_empty",
+        "chk_help_requests_closed_at_consistency"
+      ],
+      "indexes": [
+        "idx_help_requests_teacher_status",
+        "idx_help_requests_student_status",
+        "idx_help_requests_enrollment_status",
+        "idx_help_requests_open_queue"
+      ],
+      "triggers": [
+        "trg_help_requests_validate_integrity"
+      ],
+      "hasRls": true
+    },
+    {
+      "model": "PedagogicalNote",
+      "table": "pedagogical_notes",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "authorId",
+          "column": "author_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "visibilityScope",
+          "column": "visibility_scope",
+          "type": "NoteVisibilityScope",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "category",
+          "column": "category",
+          "type": "NoteCategory",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "noteContent",
+          "column": "note_content",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "requiresFollowup",
+          "column": "requires_followup",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "followupDate",
+          "column": "followup_date",
+          "type": "DateTime",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "updatedAt",
+          "column": "updated_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_pedagogical_notes_student",
+        "fk_pedagogical_notes_enrollment",
+        "fk_pedagogical_notes_author"
+      ],
+      "checkConstraints": [
+        "chk_pedagogical_notes_content_not_empty",
+        "chk_pedagogical_notes_followup_consistency"
+      ],
+      "indexes": [
+        "idx_pedagogical_notes_student_created",
+        "idx_pedagogical_notes_enrollment_scope",
+        "idx_pedagogical_notes_author_followup"
+      ],
+      "triggers": [
+        "trg_pedagogical_notes_validate_integrity",
+        "trg_pedagogical_notes_audit_trail"
+      ],
+      "hasRls": true
+    },
+    {
+      "model": "ChatMessage",
+      "table": "chat_messages",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "helpRequestId",
+          "column": "help_request_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "senderId",
+          "column": "sender_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "messageBody",
+          "column": "message_body",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isRead",
+          "column": "is_read",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "readAt",
+          "column": "read_at",
+          "type": "DateTime",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "sentAt",
+          "column": "sent_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_chat_messages_help_request",
+        "fk_chat_messages_sender"
+      ],
+      "checkConstraints": [
+        "chk_chat_messages_body_not_empty",
+        "chk_chat_messages_read_consistency",
+        "chk_chat_messages_read_after_sent"
+      ],
+      "indexes": [
+        "idx_chat_messages_request_sent",
+        "idx_chat_messages_unread"
+      ],
+      "triggers": [
+        "trg_chat_messages_validate_integrity"
+      ],
+      "hasRls": true
+    },
+    {
+      "model": "GamificationBadge",
+      "table": "gamification_badges",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "code",
+          "column": "code",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": true,
+          "hasDefault": false
+        },
+        {
+          "field": "title",
+          "column": "title",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "criteriaExplanation",
+          "column": "criteria_explanation",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "iconName",
+          "column": "icon_name",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "xpReward",
+          "column": "xp_reward",
+          "type": "Int",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "competencyId",
+          "column": "competency_id",
+          "type": "String",
+          "optional": true,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "isActive",
+          "column": "is_active",
+          "type": "Boolean",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "createdAt",
+          "column": "created_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        }
+      ],
+      "foreignKeys": [
+        "fk_gamification_badges_competency"
+      ],
+      "checkConstraints": [
+        "chk_gamification_badges_code_format",
+        "chk_gamification_badges_title_not_empty",
+        "chk_gamification_badges_description_not_empty",
+        "chk_gamification_badges_criteria_not_empty",
+        "chk_gamification_badges_icon_not_empty",
+        "chk_gamification_badges_xp_positive"
+      ],
+      "indexes": [
+        "idx_gamification_badges_active_competency",
+        "idx_gamification_badges_xp",
+        "idx_gamification_badges_active_code"
+      ],
+      "triggers": [],
+      "hasRls": false
+    },
+    {
+      "model": "StudentAchievement",
+      "table": "student_achievements",
+      "columns": [
+        {
+          "field": "id",
+          "column": "id",
+          "type": "String",
+          "optional": false,
+          "isId": true,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "studentId",
+          "column": "student_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "enrollmentId",
+          "column": "enrollment_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "badgeId",
+          "column": "badge_id",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        },
+        {
+          "field": "unlockedAt",
+          "column": "unlocked_at",
+          "type": "DateTime",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": true
+        },
+        {
+          "field": "originReference",
+          "column": "origin_reference",
+          "type": "String",
+          "optional": false,
+          "isId": false,
+          "isUnique": false,
+          "hasDefault": false
+        }
+      ],
+      "foreignKeys": [
+        "fk_student_achievements_student",
+        "fk_student_achievements_enrollment",
+        "fk_student_achievements_badge"
+      ],
+      "checkConstraints": [
+        "chk_student_achievements_origin_not_empty"
+      ],
+      "indexes": [
+        "idx_student_achievements_student_unlocked",
+        "idx_student_achievements_enrollment",
+        "idx_student_achievements_badge"
+      ],
+      "triggers": [
+        "trg_student_achievements_validate_integrity"
+      ],
+      "hasRls": false
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 // =============================================================================
 // PROJETO NEXA — SISTEMA INTELIGENTE DE MONITORAMENTO ACADÊMICO SENAI
-// CARDS: [DB-004] a [DB-025] Identidade, Auditoria, Estrutura Curricular, Diário, Oficinas e Entregas
+// CARDS: [DB-004] a [DB-050] Schema Completo NEXA SENAI (33 Tabelas 3FN, 18 Enums, Comunicação, Gamificação & Governança LGPD)
 // =============================================================================
 // Convenção adotada:
 // - Modelos e Enums em PascalCase na camada de aplicação
@@ -238,6 +238,19 @@ model User {
   recordedGrades         StudentGrade[]          @relation("StudentGradeRecorder")
   selfAssessmentForms    SelfAssessmentForm[]
   studentSelfAssessments StudentSelfAssessment[]
+  skillEvidences         SkillEvidence[]           @relation("SkillEvidenceStudent")
+  verifiedEvidences      SkillEvidence[]           @relation("SkillEvidenceVerifier")
+  academicAlerts         AcademicAlert[]           @relation("AcademicAlertStudent")
+  resolvedAlerts         AcademicAlert[]           @relation("AcademicAlertResolver")
+  explainableDiagnostics ExplainableDiagnostic[]
+  milestoneHistory       StudentMilestoneHistory[]
+  authoredAnnouncements  ClassAnnouncement[]
+  studentHelpRequests    HelpRequest[]             @relation("HelpRequestStudent")
+  assignedHelpRequests   HelpRequest[]             @relation("HelpRequestTeacher")
+  studentNotes           PedagogicalNote[]         @relation("PedagogicalNoteStudent")
+  authoredNotes          PedagogicalNote[]         @relation("PedagogicalNoteAuthor")
+  sentChatMessages       ChatMessage[]
+  achievements           StudentAchievement[]
 
   @@index([email], map: "idx_users_email")
   @@index([role, isActive], map: "idx_users_role_is_active")
@@ -345,8 +358,11 @@ model Class {
   teacherAssignments  TeacherAssignment[]
   classLessons        ClassLesson[]
   practicalTasks      PracticalTask[]
-  academicAssessments AcademicAssessment[]
-  selfAssessmentForms SelfAssessmentForm[]
+  academicAssessments    AcademicAssessment[]
+  selfAssessmentForms    SelfAssessmentForm[]
+  academicAlerts         AcademicAlert[]
+  explainableDiagnostics ExplainableDiagnostic[]
+  announcements          ClassAnnouncement[]
 
   @@unique([code, period], map: "uq_classes_code_period")
   @@index([courseId, period], map: "idx_classes_course_period")
@@ -371,6 +387,8 @@ model Subject {
   teacherAssignments  TeacherAssignment[]
   classLessons        ClassLesson[]
   academicAssessments AcademicAssessment[]
+  announcements       ClassAnnouncement[]
+  helpRequests        HelpRequest[]
 
   @@unique([courseId, code], map: "uq_subjects_course_code")
   @@index([name], map: "idx_subjects_name")
@@ -394,8 +412,12 @@ model LearningModule {
   moduleCompetencies ModuleCompetency[]
   classLessons        ClassLesson[]
   practicalTasks      PracticalTask[]
-  academicAssessments AcademicAssessment[]
-  selfAssessmentForms SelfAssessmentForm[]
+  academicAssessments    AcademicAssessment[]
+  selfAssessmentForms    SelfAssessmentForm[]
+  academicAlerts         AcademicAlert[]
+  explainableDiagnostics ExplainableDiagnostic[]
+  milestoneHistory       StudentMilestoneHistory[]
+  helpRequests           HelpRequest[]
 
   @@unique([subjectId, orderIndex], map: "uq_learning_modules_subject_order")
   @@index([subjectId, orderIndex], map: "idx_learning_modules_subject_order")
@@ -415,6 +437,9 @@ model Competency {
   moduleCompetencies     ModuleCompetency[]
   taskCriteria           TaskCriterion[]
   studentSelfAssessments StudentSelfAssessment[]
+  skillEvidences         SkillEvidence[]
+  explainableDiagnostics ExplainableDiagnostic[]
+  gamificationBadges     GamificationBadge[]
 
   @@index([code], map: "idx_competencies_code")
   @@index([category], map: "idx_competencies_category")
@@ -461,6 +486,11 @@ model Enrollment {
   attendanceRecords AttendanceRecord[]
   taskSubmissions   TaskSubmission[]
   studentGrades     StudentGrade[]
+  academicAlerts    AcademicAlert[]
+  milestoneHistory  StudentMilestoneHistory[]
+  helpRequests      HelpRequest[]
+  pedagogicalNotes  PedagogicalNote[]
+  achievements      StudentAchievement[]
 
   @@unique([studentId, classId], map: "uq_enrollments_student_class")
   @@index([attendanceRate], map: "idx_enrollments_attendance_rate")
@@ -629,6 +659,7 @@ model TaskSubmission {
   student        User                   @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_student")
   enrollment     Enrollment             @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_task_submissions_enrollment")
   evaluations    SubmissionEvaluation[]
+  skillEvidences SkillEvidence[]
 
   @@unique([taskId, studentId], map: "uq_task_submissions_task_student")
   @@unique([taskId, enrollmentId], map: "uq_task_submissions_task_enrollment")
@@ -687,6 +718,7 @@ model AcademicAssessment {
   subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_assessments_subject")
   module          LearningModule? @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_assessments_module")
   grades          StudentGrade[]
+  skillEvidences  SkillEvidence[]
 
   @@index([classId, subjectId, applicationDate], map: "idx_academic_assessments_class_subject_date")
   @@index([applicationDate], map: "idx_academic_assessments_application_date")
@@ -726,6 +758,8 @@ model StudentGrade {
   @@index([studentId], map: "idx_student_grades_student")
   @@index([enrollmentId], map: "idx_student_grades_enrollment")
   @@index([recordedBy, updatedAt], map: "idx_student_grades_recorded_by")
+  @@index([assessmentId, gradeValue], map: "idx_student_grades_assessment_score")
+  @@index([enrollmentId, assessmentId], map: "idx_student_grades_enrollment_assessment")
   @@map("student_grades")
 }
 
@@ -786,4 +820,269 @@ model StudentSelfAssessment {
   @@index([formId, studentId], map: "idx_student_self_assessments_form_student")
   @@index([competencyId], map: "idx_student_self_assessments_competency")
   @@map("student_self_assessments")
+}
+
+/// Evidências práticas e formativas verificadas por docentes por competência na escala 1.00..5.00 (DB-033)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-033):
+/// - `chk_skill_evidences_level`: `CHECK (verified_level >= 1.00 AND verified_level <= 5.00)`
+/// - `chk_skill_evidences_source`: `CHECK (source_submission_id IS NOT NULL OR source_assessment_id IS NOT NULL)`
+/// - `trg_skill_evidences_validate_integrity`: exige perfil `STUDENT` em `student_id`, `TEACHER` em `verified_by`, bloqueia autoverificação e valida titularidade da origem
+model SkillEvidence {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId          String              @map("student_id") @db.Uuid
+  competencyId       String              @map("competency_id") @db.Uuid
+  sourceSubmissionId String?             @map("source_submission_id") @db.Uuid
+  sourceAssessmentId String?             @map("source_assessment_id") @db.Uuid
+  verifiedLevel      Decimal             @map("verified_level") @db.Decimal(3, 2)
+  verifiedBy         String              @map("verified_by") @db.Uuid
+  recordedAt         DateTime            @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  student            User                @relation("SkillEvidenceStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_skill_evidences_student")
+  competency         Competency          @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_skill_evidences_competency")
+  sourceSubmission   TaskSubmission?     @relation(fields: [sourceSubmissionId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_skill_evidences_submission")
+  sourceAssessment   AcademicAssessment? @relation(fields: [sourceAssessmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_skill_evidences_assessment")
+  verifier           User                @relation("SkillEvidenceVerifier", fields: [verifiedBy], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_skill_evidences_verifier")
+
+  @@index([studentId, competencyId], map: "idx_skill_evidences_student_competency")
+  @@index([studentId, recordedAt(sort: Desc)], map: "idx_skill_evidences_student_recorded")
+  @@index([verifiedBy], map: "idx_skill_evidences_verified_by")
+  @@map("skill_evidences")
+}
+
+/// Alertas precoces e explicáveis de risco acadêmico com snapshot JSONB de métricas (DB-034)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-034):
+/// - `chk_academic_alerts_reason_not_empty`: `CHECK (CHAR_LENGTH(BTRIM(explainable_reason)) >= 10)`
+/// - `chk_academic_alerts_metric_snapshot_object`: `CHECK (jsonb_typeof(metric_snapshot) = 'object')`
+/// - `trg_academic_alerts_validate_integrity`: valida coerência entre `enrollment_id`, `student_id` e `class_id` e impede `resolved_by` com perfil `STUDENT`
+model AcademicAlert {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId         String          @map("student_id") @db.Uuid
+  enrollmentId      String          @map("enrollment_id") @db.Uuid
+  classId           String          @map("class_id") @db.Uuid
+  moduleId          String?         @map("module_id") @db.Uuid
+  riskLevel         RiskLevel       @map("risk_level")
+  alertCategory     AlertCategory   @map("alert_category")
+  explainableReason String          @map("explainable_reason") @db.Text
+  metricSnapshot    Json            @map("metric_snapshot") @db.JsonB
+  status            AlertStatus     @default(ACTIVE) @map("status")
+  resolvedBy        String?         @map("resolved_by") @db.Uuid
+  resolutionNotes   String?         @map("resolution_notes") @db.Text
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  student           User            @relation("AcademicAlertStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_academic_alerts_student")
+  enrollment        Enrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_academic_alerts_enrollment")
+  academicClass     Class           @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_academic_alerts_class")
+  module            LearningModule? @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_academic_alerts_module")
+  resolver          User?           @relation("AcademicAlertResolver", fields: [resolvedBy], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_academic_alerts_resolver")
+
+  @@index([classId, status, riskLevel], map: "idx_academic_alerts_class_status_risk")
+  @@index([classId, riskLevel], map: "idx_academic_alerts_class_risk_level")
+  @@index([studentId, status, createdAt(sort: Desc)], map: "idx_academic_alerts_student_status")
+  @@index([enrollmentId, status], map: "idx_academic_alerts_enrollment_status")
+  @@map("academic_alerts")
+}
+
+/// Diagnósticos pedagógicos explicáveis comparando autoavaliação discente e evidência docente (DB-035)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-035):
+/// - `chk_diagnostics_self_level` / `chk_diagnostics_teacher_level`: `CHECK (... BETWEEN 1.00 AND 5.00)`
+/// - `chk_diagnostics_explanation_not_empty` / `chk_diagnostics_limitations_not_empty` / `chk_diagnostics_action_not_empty`
+/// - `trg_explainable_diagnostics_compute_and_validate`: calcula automaticamente `discrepancy_gap = ROUND(self_perceived_level - teacher_verified_level, 2)`
+model ExplainableDiagnostic {
+  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId            String         @map("student_id") @db.Uuid
+  classId              String         @map("class_id") @db.Uuid
+  moduleId             String         @map("module_id") @db.Uuid
+  competencyId         String?        @map("competency_id") @db.Uuid
+  selfPerceivedLevel   Decimal        @map("self_perceived_level") @db.Decimal(3, 2)
+  teacherVerifiedLevel Decimal        @map("teacher_verified_level") @db.Decimal(3, 2)
+  discrepancyGap       Decimal        @map("discrepancy_gap") @db.Decimal(3, 2)
+  diagnosticType       DiagnosticType @map("diagnostic_type")
+  explanationText      String         @map("explanation_text") @db.Text
+  limitationsNote      String         @map("limitations_note") @db.Text
+  recommendedAction    String         @map("recommended_action") @db.Text
+  generatedAt          DateTime       @default(now()) @map("generated_at") @db.Timestamptz(6)
+  student              User           @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_diagnostics_student")
+  academicClass        Class          @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_diagnostics_class")
+  module               LearningModule @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_diagnostics_module")
+  competency           Competency?    @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_diagnostics_competency")
+
+  @@index([classId, diagnosticType], map: "idx_explainable_diagnostics_class_type")
+  @@index([studentId, moduleId, generatedAt(sort: Desc)], map: "idx_explainable_diagnostics_student_module")
+  @@map("explainable_diagnostics")
+}
+
+/// Linha do tempo cronológica de marcos positivos e evolução acadêmica do estudante (DB-039)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-039):
+/// - `chk_milestone_history_title_not_empty`: `CHECK (CHAR_LENGTH(BTRIM(title)) >= 3)`
+/// - `chk_milestone_history_metadata_object`: `CHECK (metadata IS NULL OR jsonb_typeof(metadata) = 'object')`
+/// - `trg_student_milestone_history_validate_integrity`: valida perfil `STUDENT` e coerência com `enrollment_id`
+model StudentMilestoneHistory {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId     String          @map("student_id") @db.Uuid
+  enrollmentId  String          @map("enrollment_id") @db.Uuid
+  moduleId      String?         @map("module_id") @db.Uuid
+  milestoneType MilestoneType   @map("milestone_type")
+  title         String          @map("title") @db.VarChar(150)
+  description   String?         @map("description") @db.Text
+  metadata      Json?           @map("metadata") @db.JsonB
+  achievedAt    DateTime        @default(now()) @map("achieved_at") @db.Timestamptz(6)
+  student       User            @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_milestone_history_student")
+  enrollment    Enrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_milestone_history_enrollment")
+  module        LearningModule? @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_milestone_history_module")
+
+  @@index([studentId, achievedAt(sort: Desc)], map: "idx_milestone_history_student_achieved")
+  @@index([enrollmentId, achievedAt(sort: Desc)], map: "idx_milestone_history_enrollment_achieved")
+  @@index([milestoneType], map: "idx_milestone_history_type")
+  @@map("student_milestone_history")
+}
+
+// =============================================================================
+// 8. COMUNICAÇÃO OFICIAL, APOIO CONFIDENCIAL, NOTAS RESTRITAS & GAMIFICAÇÃO (DB-041..DB-046)
+// =============================================================================
+
+/// Mural oficial de avisos publicados por docentes e coordenadores para uma turma/disciplina (DB-041)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-041):
+/// - `chk_announcements_title_not_empty` / `chk_announcements_content_not_empty` / `chk_announcements_expiration`
+/// - `trg_class_announcements_validate_integrity`: exige perfil docente/gestão em `author_id` e coerência de curso com `subject_id`
+model ClassAnnouncement {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  classId       String               @map("class_id") @db.Uuid
+  subjectId     String?              @map("subject_id") @db.Uuid
+  authorId      String               @map("author_id") @db.Uuid
+  title         String               @map("title") @db.VarChar(150)
+  content       String               @map("content") @db.Text
+  priority      AnnouncementPriority @default(NORMAL) @map("priority")
+  isPinned      Boolean              @default(false) @map("is_pinned")
+  publishedAt   DateTime             @default(now()) @map("published_at") @db.Timestamptz(6)
+  expiresAt     DateTime?            @map("expires_at") @db.Timestamptz(6)
+  academicClass Class                @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_announcements_class")
+  subject       Subject?             @relation(fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_announcements_subject")
+  author        User                 @relation(fields: [authorId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_announcements_author")
+
+  @@index([classId, isPinned(sort: Desc), publishedAt(sort: Desc)], map: "idx_class_announcements_feed")
+  @@index([classId, priority, publishedAt(sort: Desc)], map: "idx_class_announcements_priority")
+  @@index([authorId], map: "idx_class_announcements_author")
+  @@map("class_announcements")
+}
+
+/// Solicitações confidenciais de apoio pedagógico e mentoria feitas por estudantes (DB-042)
+/// Constraints nativas PostgreSQL (@check / RLS / Triggers — DB-042):
+/// - `pol_help_requests_confidential_isolation`: Row-Level Security impedindo leitura por outros estudantes
+/// - `trg_help_requests_validate_integrity`: valida papel `STUDENT`, titularidade de matrícula e máquina de estados `OPEN -> IN_PROGRESS -> RESOLVED -> CLOSED`
+model HelpRequest {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId         String              @map("student_id") @db.Uuid
+  enrollmentId      String              @map("enrollment_id") @db.Uuid
+  subjectId         String              @map("subject_id") @db.Uuid
+  moduleId          String?             @map("module_id") @db.Uuid
+  assignedTeacherId String?             @map("assigned_teacher_id") @db.Uuid
+  category          HelpRequestCategory @map("category")
+  subjectTitle      String              @map("subject_title") @db.VarChar(150)
+  description       String              @map("description") @db.Text
+  isConfidential    Boolean             @default(true) @map("is_confidential")
+  status            HelpRequestStatus   @default(OPEN) @map("status")
+  resolutionSummary String?             @map("resolution_summary") @db.Text
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  closedAt          DateTime?           @map("closed_at") @db.Timestamptz(6)
+  student           User                @relation("HelpRequestStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_help_requests_student")
+  enrollment        Enrollment          @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_help_requests_enrollment")
+  subject           Subject             @relation(fields: [subjectId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_help_requests_subject")
+  module            LearningModule?     @relation(fields: [moduleId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_help_requests_module")
+  assignedTeacher   User?               @relation("HelpRequestTeacher", fields: [assignedTeacherId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "fk_help_requests_teacher")
+  messages          ChatMessage[]
+
+  @@index([assignedTeacherId, status], map: "idx_help_requests_teacher_status")
+  @@index([studentId, status], map: "idx_help_requests_student_status")
+  @@index([enrollmentId, status], map: "idx_help_requests_enrollment_status")
+  @@map("help_requests")
+}
+
+/// Observações pedagógicas restritas com visibility_scope, RLS e trilha obrigatória em audit_logs (DB-043)
+/// Constraints nativas PostgreSQL (@check / RLS / Triggers — DB-043):
+/// - `trg_pedagogical_notes_audit_trail` + `fn_read_pedagogical_note_audited`: registram toda escrita e leitura em `audit_logs`
+/// - `pol_pedagogical_notes_scope_isolation`: impede qualquer leitura por `STUDENT` e aplica `visibility_scope`
+model PedagogicalNote {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId        String              @map("student_id") @db.Uuid
+  enrollmentId     String              @map("enrollment_id") @db.Uuid
+  authorId         String              @map("author_id") @db.Uuid
+  visibilityScope  NoteVisibilityScope @default(PRIVATE_AUTHOR) @map("visibility_scope")
+  category         NoteCategory        @map("category")
+  noteContent      String              @map("note_content") @db.Text
+  requiresFollowup Boolean             @default(false) @map("requires_followup")
+  followupDate     DateTime?           @map("followup_date") @db.Date
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @updatedAt @default(now()) @map("updated_at") @db.Timestamptz(6)
+  student          User                @relation("PedagogicalNoteStudent", fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_pedagogical_notes_student")
+  enrollment       Enrollment          @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_pedagogical_notes_enrollment")
+  author           User                @relation("PedagogicalNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_pedagogical_notes_author")
+
+  @@index([studentId, createdAt(sort: Desc)], map: "idx_pedagogical_notes_student_created")
+  @@index([enrollmentId, visibilityScope], map: "idx_pedagogical_notes_enrollment_scope")
+  @@index([authorId, requiresFollowup, followupDate], map: "idx_pedagogical_notes_author_followup")
+  @@map("pedagogical_notes")
+}
+
+/// Mensagens privadas dentro de solicitações de apoio (help_requests) com controle de leitura (DB-044)
+/// Constraints nativas PostgreSQL (@check / RLS / Triggers — DB-044):
+/// - `fk_chat_messages_help_request`: `ON DELETE CASCADE`
+/// - `chk_chat_messages_read_consistency` e `pol_chat_messages_participants_only`
+model ChatMessage {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  helpRequestId String      @map("help_request_id") @db.Uuid
+  senderId      String      @map("sender_id") @db.Uuid
+  messageBody   String      @map("message_body") @db.Text
+  isRead        Boolean     @default(false) @map("is_read")
+  readAt        DateTime?   @map("read_at") @db.Timestamptz(6)
+  sentAt        DateTime    @default(now()) @map("sent_at") @db.Timestamptz(6)
+  helpRequest   HelpRequest @relation(fields: [helpRequestId], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_chat_messages_help_request")
+  sender        User        @relation(fields: [senderId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_chat_messages_sender")
+
+  @@index([helpRequestId, sentAt(sort: Asc)], map: "idx_chat_messages_request_sent")
+  @@map("chat_messages")
+}
+
+/// Catálogo transparente de conquistas técnicas SENAI e níveis pedagógicos de XP (DB-045)
+/// Constraints nativas PostgreSQL (@check — DB-045):
+/// - `uq_gamification_badges_code`: `UNIQUE (code)`
+/// - `chk_gamification_badges_criteria_not_empty`: exige critério transparente explícito
+/// - `chk_gamification_badges_xp_positive`: `CHECK (xp_reward > 0 AND xp_reward <= 5000)`
+model GamificationBadge {
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  code                String               @unique(map: "uq_gamification_badges_code") @map("code") @db.VarChar(60)
+  title               String               @map("title") @db.VarChar(120)
+  description         String               @map("description") @db.Text
+  criteriaExplanation String               @map("criteria_explanation") @db.Text
+  iconName            String               @map("icon_name") @db.VarChar(80)
+  xpReward            Int                  @default(50) @map("xp_reward")
+  competencyId        String?              @map("competency_id") @db.Uuid
+  isActive            Boolean              @default(true) @map("is_active")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  competency          Competency?          @relation(fields: [competencyId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_gamification_badges_competency")
+  achievements        StudentAchievement[]
+
+  @@index([isActive, competencyId], map: "idx_gamification_badges_active_competency")
+  @@index([xpReward(sort: Desc)], map: "idx_gamification_badges_xp")
+  @@map("gamification_badges")
+}
+
+/// Conquistas técnicas desbloqueadas pelos estudantes sem duplicidade (DB-046)
+/// Constraints nativas PostgreSQL (@check / Triggers — DB-046):
+/// - `uq_student_achievements_composite`: `UNIQUE (student_id, badge_id)`
+/// - `trg_student_achievements_validate_integrity`: valida papel `STUDENT`, matrícula e badge ativo
+model StudentAchievement {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @map("id") @db.Uuid
+  studentId       String            @map("student_id") @db.Uuid
+  enrollmentId    String            @map("enrollment_id") @db.Uuid
+  badgeId         String            @map("badge_id") @db.Uuid
+  unlockedAt      DateTime          @default(now()) @map("unlocked_at") @db.Timestamptz(6)
+  originReference String            @map("origin_reference") @db.VarChar(150)
+  student         User              @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_achievements_student")
+  enrollment      Enrollment        @relation(fields: [enrollmentId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_achievements_enrollment")
+  badge           GamificationBadge @relation(fields: [badgeId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "fk_student_achievements_badge")
+
+  @@unique([studentId, badgeId], map: "uq_student_achievements_composite")
+  @@index([studentId, unlockedAt(sort: Desc)], map: "idx_student_achievements_student_unlocked")
+  @@index([enrollmentId], map: "idx_student_achievements_enrollment")
+  @@index([badgeId], map: "idx_student_achievements_badge")
+  @@map("student_achievements")
 }

@@ -4,7 +4,7 @@
  * Sincronizado com `prisma/schema.prisma` (camelCase na aplicação e snake_case no SQL).
  */
 
-import type { AssessmentType, AttendanceStatus, ClassStatus, CompetencyCategory, EnrollmentStatus, Role, Shift, SubmissionStatus } from './system-enums';
+import type { AlertCategory, AlertStatus, AnnouncementPriority, AssessmentType, AttendanceStatus, ClassStatus, CompetencyCategory, DiagnosticType, EnrollmentStatus, HelpRequestCategory, HelpRequestStatus, MilestoneType, NoteCategory, NoteVisibilityScope, RiskLevel, Role, Shift, SubmissionStatus } from './system-enums';
 
 /** Modelo Prisma `SchemaMigration` mapeado para a tabela PostgreSQL `schema_migrations` */
 export interface SchemaMigration {
@@ -944,3 +944,459 @@ export interface StudentSelfAssessmentCreateInput {
 
 /** Payload de atualização parcial para `StudentSelfAssessment` */
 export type StudentSelfAssessmentUpdateInput = Partial<Omit<StudentSelfAssessmentCreateInput, 'id'>>;
+
+/** Modelo Prisma `SkillEvidence` mapeado para a tabela PostgreSQL `skill_evidences` */
+export interface SkillEvidence {
+  id: string;
+  studentId: string;
+  competencyId: string;
+  sourceSubmissionId: string | null;
+  sourceAssessmentId: string | null;
+  verifiedLevel: number | string;
+  verifiedBy: string;
+  recordedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `skill_evidences` */
+export interface SkillEvidenceRow {
+  id: string;
+  student_id: string;
+  competency_id: string;
+  source_submission_id: string | null;
+  source_assessment_id: string | null;
+  verified_level: number | string;
+  verified_by: string;
+  recorded_at: Date;
+}
+
+/** Payload de criação para `SkillEvidence` */
+export interface SkillEvidenceCreateInput {
+  id?: string;
+  studentId: string;
+  competencyId: string;
+  sourceSubmissionId?: string | null;
+  sourceAssessmentId?: string | null;
+  verifiedLevel: number | string;
+  verifiedBy: string;
+  recordedAt?: Date;
+}
+
+/** Payload de atualização parcial para `SkillEvidence` */
+export type SkillEvidenceUpdateInput = Partial<Omit<SkillEvidenceCreateInput, 'id'>>;
+
+/** Modelo Prisma `AcademicAlert` mapeado para a tabela PostgreSQL `academic_alerts` */
+export interface AcademicAlert {
+  id: string;
+  studentId: string;
+  enrollmentId: string;
+  classId: string;
+  moduleId: string | null;
+  riskLevel: RiskLevel;
+  alertCategory: AlertCategory;
+  explainableReason: string;
+  metricSnapshot: Record<string, unknown>;
+  status: AlertStatus;
+  resolvedBy: string | null;
+  resolutionNotes: string | null;
+  createdAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `academic_alerts` */
+export interface AcademicAlertRow {
+  id: string;
+  student_id: string;
+  enrollment_id: string;
+  class_id: string;
+  module_id: string | null;
+  risk_level: RiskLevel;
+  alert_category: AlertCategory;
+  explainable_reason: string;
+  metric_snapshot: Record<string, unknown>;
+  status: AlertStatus;
+  resolved_by: string | null;
+  resolution_notes: string | null;
+  created_at: Date;
+}
+
+/** Payload de criação para `AcademicAlert` */
+export interface AcademicAlertCreateInput {
+  id?: string;
+  studentId: string;
+  enrollmentId: string;
+  classId: string;
+  moduleId?: string | null;
+  riskLevel: RiskLevel;
+  alertCategory: AlertCategory;
+  explainableReason: string;
+  metricSnapshot: Record<string, unknown>;
+  status?: AlertStatus;
+  resolvedBy?: string | null;
+  resolutionNotes?: string | null;
+  createdAt?: Date;
+}
+
+/** Payload de atualização parcial para `AcademicAlert` */
+export type AcademicAlertUpdateInput = Partial<Omit<AcademicAlertCreateInput, 'id'>>;
+
+/** Modelo Prisma `ExplainableDiagnostic` mapeado para a tabela PostgreSQL `explainable_diagnostics` */
+export interface ExplainableDiagnostic {
+  id: string;
+  studentId: string;
+  classId: string;
+  moduleId: string;
+  competencyId: string | null;
+  selfPerceivedLevel: number | string;
+  teacherVerifiedLevel: number | string;
+  discrepancyGap: number | string;
+  diagnosticType: DiagnosticType;
+  explanationText: string;
+  limitationsNote: string;
+  recommendedAction: string;
+  generatedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `explainable_diagnostics` */
+export interface ExplainableDiagnosticRow {
+  id: string;
+  student_id: string;
+  class_id: string;
+  module_id: string;
+  competency_id: string | null;
+  self_perceived_level: number | string;
+  teacher_verified_level: number | string;
+  discrepancy_gap: number | string;
+  diagnostic_type: DiagnosticType;
+  explanation_text: string;
+  limitations_note: string;
+  recommended_action: string;
+  generated_at: Date;
+}
+
+/** Payload de criação para `ExplainableDiagnostic` */
+export interface ExplainableDiagnosticCreateInput {
+  id?: string;
+  studentId: string;
+  classId: string;
+  moduleId: string;
+  competencyId?: string | null;
+  selfPerceivedLevel: number | string;
+  teacherVerifiedLevel: number | string;
+  discrepancyGap: number | string;
+  diagnosticType: DiagnosticType;
+  explanationText: string;
+  limitationsNote: string;
+  recommendedAction: string;
+  generatedAt?: Date;
+}
+
+/** Payload de atualização parcial para `ExplainableDiagnostic` */
+export type ExplainableDiagnosticUpdateInput = Partial<Omit<ExplainableDiagnosticCreateInput, 'id'>>;
+
+/** Modelo Prisma `StudentMilestoneHistory` mapeado para a tabela PostgreSQL `student_milestone_history` */
+export interface StudentMilestoneHistory {
+  id: string;
+  studentId: string;
+  enrollmentId: string;
+  moduleId: string | null;
+  milestoneType: MilestoneType;
+  title: string;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
+  achievedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `student_milestone_history` */
+export interface StudentMilestoneHistoryRow {
+  id: string;
+  student_id: string;
+  enrollment_id: string;
+  module_id: string | null;
+  milestone_type: MilestoneType;
+  title: string;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
+  achieved_at: Date;
+}
+
+/** Payload de criação para `StudentMilestoneHistory` */
+export interface StudentMilestoneHistoryCreateInput {
+  id?: string;
+  studentId: string;
+  enrollmentId: string;
+  moduleId?: string | null;
+  milestoneType: MilestoneType;
+  title: string;
+  description?: string | null;
+  metadata?: Record<string, unknown> | null;
+  achievedAt?: Date;
+}
+
+/** Payload de atualização parcial para `StudentMilestoneHistory` */
+export type StudentMilestoneHistoryUpdateInput = Partial<Omit<StudentMilestoneHistoryCreateInput, 'id'>>;
+
+/** Modelo Prisma `ClassAnnouncement` mapeado para a tabela PostgreSQL `class_announcements` */
+export interface ClassAnnouncement {
+  id: string;
+  classId: string;
+  subjectId: string | null;
+  authorId: string;
+  title: string;
+  content: string;
+  priority: AnnouncementPriority;
+  isPinned: boolean;
+  publishedAt: Date;
+  expiresAt: Date | null;
+}
+
+/** Registro SQL snake_case da tabela `class_announcements` */
+export interface ClassAnnouncementRow {
+  id: string;
+  class_id: string;
+  subject_id: string | null;
+  author_id: string;
+  title: string;
+  content: string;
+  priority: AnnouncementPriority;
+  is_pinned: boolean;
+  published_at: Date;
+  expires_at: Date | null;
+}
+
+/** Payload de criação para `ClassAnnouncement` */
+export interface ClassAnnouncementCreateInput {
+  id?: string;
+  classId: string;
+  subjectId?: string | null;
+  authorId: string;
+  title: string;
+  content: string;
+  priority?: AnnouncementPriority;
+  isPinned?: boolean;
+  publishedAt?: Date;
+  expiresAt?: Date | null;
+}
+
+/** Payload de atualização parcial para `ClassAnnouncement` */
+export type ClassAnnouncementUpdateInput = Partial<Omit<ClassAnnouncementCreateInput, 'id'>>;
+
+/** Modelo Prisma `HelpRequest` mapeado para a tabela PostgreSQL `help_requests` */
+export interface HelpRequest {
+  id: string;
+  studentId: string;
+  enrollmentId: string;
+  subjectId: string;
+  moduleId: string | null;
+  assignedTeacherId: string | null;
+  category: HelpRequestCategory;
+  subjectTitle: string;
+  description: string;
+  isConfidential: boolean;
+  status: HelpRequestStatus;
+  resolutionSummary: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  closedAt: Date | null;
+}
+
+/** Registro SQL snake_case da tabela `help_requests` */
+export interface HelpRequestRow {
+  id: string;
+  student_id: string;
+  enrollment_id: string;
+  subject_id: string;
+  module_id: string | null;
+  assigned_teacher_id: string | null;
+  category: HelpRequestCategory;
+  subject_title: string;
+  description: string;
+  is_confidential: boolean;
+  status: HelpRequestStatus;
+  resolution_summary: string | null;
+  created_at: Date;
+  updated_at: Date;
+  closed_at: Date | null;
+}
+
+/** Payload de criação para `HelpRequest` */
+export interface HelpRequestCreateInput {
+  id?: string;
+  studentId: string;
+  enrollmentId: string;
+  subjectId: string;
+  moduleId?: string | null;
+  assignedTeacherId?: string | null;
+  category: HelpRequestCategory;
+  subjectTitle: string;
+  description: string;
+  isConfidential?: boolean;
+  status?: HelpRequestStatus;
+  resolutionSummary?: string | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+  closedAt?: Date | null;
+}
+
+/** Payload de atualização parcial para `HelpRequest` */
+export type HelpRequestUpdateInput = Partial<Omit<HelpRequestCreateInput, 'id'>>;
+
+/** Modelo Prisma `PedagogicalNote` mapeado para a tabela PostgreSQL `pedagogical_notes` */
+export interface PedagogicalNote {
+  id: string;
+  studentId: string;
+  enrollmentId: string;
+  authorId: string;
+  visibilityScope: NoteVisibilityScope;
+  category: NoteCategory;
+  noteContent: string;
+  requiresFollowup: boolean;
+  followupDate: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `pedagogical_notes` */
+export interface PedagogicalNoteRow {
+  id: string;
+  student_id: string;
+  enrollment_id: string;
+  author_id: string;
+  visibility_scope: NoteVisibilityScope;
+  category: NoteCategory;
+  note_content: string;
+  requires_followup: boolean;
+  followup_date: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Payload de criação para `PedagogicalNote` */
+export interface PedagogicalNoteCreateInput {
+  id?: string;
+  studentId: string;
+  enrollmentId: string;
+  authorId: string;
+  visibilityScope?: NoteVisibilityScope;
+  category: NoteCategory;
+  noteContent: string;
+  requiresFollowup?: boolean;
+  followupDate?: Date | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/** Payload de atualização parcial para `PedagogicalNote` */
+export type PedagogicalNoteUpdateInput = Partial<Omit<PedagogicalNoteCreateInput, 'id'>>;
+
+/** Modelo Prisma `ChatMessage` mapeado para a tabela PostgreSQL `chat_messages` */
+export interface ChatMessage {
+  id: string;
+  helpRequestId: string;
+  senderId: string;
+  messageBody: string;
+  isRead: boolean;
+  readAt: Date | null;
+  sentAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `chat_messages` */
+export interface ChatMessageRow {
+  id: string;
+  help_request_id: string;
+  sender_id: string;
+  message_body: string;
+  is_read: boolean;
+  read_at: Date | null;
+  sent_at: Date;
+}
+
+/** Payload de criação para `ChatMessage` */
+export interface ChatMessageCreateInput {
+  id?: string;
+  helpRequestId: string;
+  senderId: string;
+  messageBody: string;
+  isRead?: boolean;
+  readAt?: Date | null;
+  sentAt?: Date;
+}
+
+/** Payload de atualização parcial para `ChatMessage` */
+export type ChatMessageUpdateInput = Partial<Omit<ChatMessageCreateInput, 'id'>>;
+
+/** Modelo Prisma `GamificationBadge` mapeado para a tabela PostgreSQL `gamification_badges` */
+export interface GamificationBadge {
+  id: string;
+  code: string;
+  title: string;
+  description: string;
+  criteriaExplanation: string;
+  iconName: string;
+  xpReward: number;
+  competencyId: string | null;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+/** Registro SQL snake_case da tabela `gamification_badges` */
+export interface GamificationBadgeRow {
+  id: string;
+  code: string;
+  title: string;
+  description: string;
+  criteria_explanation: string;
+  icon_name: string;
+  xp_reward: number;
+  competency_id: string | null;
+  is_active: boolean;
+  created_at: Date;
+}
+
+/** Payload de criação para `GamificationBadge` */
+export interface GamificationBadgeCreateInput {
+  id?: string;
+  code: string;
+  title: string;
+  description: string;
+  criteriaExplanation: string;
+  iconName: string;
+  xpReward?: number;
+  competencyId?: string | null;
+  isActive?: boolean;
+  createdAt?: Date;
+}
+
+/** Payload de atualização parcial para `GamificationBadge` */
+export type GamificationBadgeUpdateInput = Partial<Omit<GamificationBadgeCreateInput, 'id'>>;
+
+/** Modelo Prisma `StudentAchievement` mapeado para a tabela PostgreSQL `student_achievements` */
+export interface StudentAchievement {
+  id: string;
+  studentId: string;
+  enrollmentId: string;
+  badgeId: string;
+  unlockedAt: Date;
+  originReference: string;
+}
+
+/** Registro SQL snake_case da tabela `student_achievements` */
+export interface StudentAchievementRow {
+  id: string;
+  student_id: string;
+  enrollment_id: string;
+  badge_id: string;
+  unlocked_at: Date;
+  origin_reference: string;
+}
+
+/** Payload de criação para `StudentAchievement` */
+export interface StudentAchievementCreateInput {
+  id?: string;
+  studentId: string;
+  enrollmentId: string;
+  badgeId: string;
+  unlockedAt?: Date;
+  originReference: string;
+}
+
+/** Payload de atualização parcial para `StudentAchievement` */
+export type StudentAchievementUpdateInput = Partial<Omit<StudentAchievementCreateInput, 'id'>>;
