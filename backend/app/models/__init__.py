@@ -12,6 +12,7 @@ from app.models.academic_class import AcademicClass
 from app.models.audit_log import AuditLog
 from app.models.auth_session import AuthSession
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.class_announcement import ClassAnnouncement
 from app.models.class_lesson import (
     AttendanceRecord,
     ClassLesson,
@@ -54,6 +55,7 @@ __all__ = [
     "AuditLog",
     "AuthSession",
     "Base",
+    "ClassAnnouncement",
     "ClassLesson",
     "Competency",
     "Course",

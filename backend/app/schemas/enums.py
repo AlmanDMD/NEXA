@@ -124,10 +124,19 @@ class DiagnosticType(StrEnum):
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 
+class AnnouncementPriority(StrEnum):
+    """Prioridade visual de comunicados no mural da turma — 'announcement_priority_enum' (DB-041)."""
+
+    NORMAL = "NORMAL"
+    IMPORTANT = "IMPORTANT"
+    URGENT = "URGENT"
+
+
 __all__ = [
     "AcademicStandingStatus",
     "AlertCategory",
     "AlertStatus",
+    "AnnouncementPriority",
     "AssessmentType",
     "AttendanceStatus",
     "ClassStatus",
