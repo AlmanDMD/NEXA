@@ -16,6 +16,7 @@ from app.models.academic_assessment import AcademicAssessment
 from app.models.academic_class import AcademicClass
 from app.models.class_lesson import ClassLesson
 from app.models.practical_task import PracticalTask
+from app.models.self_assessment import SelfAssessmentForm
 from app.models.teacher_assignment import TeacherAssignment
 from app.schemas.enums import ClassStatus, UserRole
 
@@ -33,6 +34,7 @@ ClassResolutionSource = Literal[
     "lesson_id",
     "task_id",
     "assessment_id",
+    "form_id",
     "body_class_id",
 ]
 
@@ -93,6 +95,14 @@ def check_class_is_active(
                 resolved_class_id = db.scalar(
                     select(AcademicAssessment.class_id).where(
                         AcademicAssessment.id == assessment_id
+                    )
+                )
+        elif source == "form_id":
+            form_id = _parse_uuid_safe(request.path_params.get("form_id"))
+            if form_id is not None:
+                resolved_class_id = db.scalar(
+                    select(SelfAssessmentForm.class_id).where(
+                        SelfAssessmentForm.id == form_id
                     )
                 )
         elif source == "body_class_id":
