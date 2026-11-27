@@ -21,7 +21,9 @@ from app.repositories.practical_task_repository import (
     PracticalTaskRepository,
     PracticalTaskRepositoryDep,
 )
+from app.repositories.diagnostic_repository import DiagnosticRepository
 from app.repositories.risk_engine_repository import RiskEngineRepository
+from app.services.diagnostic_service import DiagnosticService
 from app.services.risk_engine_service import RiskEngineService
 from app.schemas.class_lesson import (
     LessonModuleSummarySchema,
@@ -382,6 +384,14 @@ class PracticalTaskService:
         RiskEngineService(
             repository=RiskEngineRepository(session=self._repository.session)
         ).evaluate_student_enrollment_risk(enrollment_id=enrollment.id)
+        DiagnosticService(
+            repository=DiagnosticRepository(session=self._repository.session)
+        ).run_diagnostic_crossover(
+            class_id=task.class_id,
+            module_id=task.module_id,
+            student_id=enrollment.student_id,
+            competency_ids=[comp_id for comp_id, _ in competency_verified_levels],
+        )
 
         evaluations_response = [
             SubmissionCriterionEvaluationResponseSchema(

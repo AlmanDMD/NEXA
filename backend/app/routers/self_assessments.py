@@ -1,8 +1,9 @@
-"""Router para Cadastro, Reabertura, Consulta e Submissão de Questionários de Autoavaliação de Competências (EPIC-07 / BE-035 / BE-036)."""
+"""Router para Cadastro, Reabertura, Consulta, Submissão de Autoavaliação e Motor de Cruzamento Diagnóstico (EPIC-07 / BE-035 / BE-036 / BE-037)."""
 
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.class_period_guard import check_class_is_active
 from app.core.security import CurrentUserDep, require_role
@@ -12,12 +13,14 @@ from app.schemas.enums import UserRole
 from app.schemas.self_assessment import (
     ClassSelfAssessmentFormsListResponseSchema,
     ClassSelfAssessmentFormsParamsDep,
+    DiagnosticEngineEvaluationResponseSchema,
     SelfAssessmentFormCreateSchema,
     SelfAssessmentFormResponseSchema,
     SelfAssessmentFormUpdateWindowSchema,
     StudentSelfAssessmentSubmitRequestSchema,
     StudentSelfAssessmentSubmitResponseSchema,
 )
+from app.services.diagnostic_service import DiagnosticServiceDep
 from app.services.self_assessment_service import SelfAssessmentServiceDep
 
 router = APIRouter(
@@ -123,6 +126,43 @@ async def submit_student_self_assessment(
     """Grava as respostas do estudante logado em student_self_assessments, sugere pedido de ajuda quando perceived_level <= 2 e dispara o cruzamento diagnóstico."""
     return self_assessment_service.submit_student_self_assessment(
         payload,
+        current_user=current_user,
+    )
+
+
+@router.post(
+    "/classes/{class_id}/diagnostics/evaluate",
+    response_model=DiagnosticEngineEvaluationResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Executar motor de cruzamento diagnóstico (Autoavaliação vs. Avaliação Prática do Docente) para a turma",
+)
+@router.post(
+    "/self-assessments/diagnostics/evaluate/{class_id}",
+    response_model=DiagnosticEngineEvaluationResponseSchema,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def evaluate_class_explainable_diagnostics(
+    class_id: UUIDPathParam,
+    diagnostic_service: DiagnosticServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(require_role(UserRole.ADMIN, UserRole.COORDINATOR, UserRole.TEACHER)),
+    ],
+    module_id: Annotated[
+        UUID | None,
+        Query(description="Filtro opcional pelo UUID do módulo prático"),
+    ] = None,
+    student_id: Annotated[
+        UUID | None,
+        Query(description="Filtro opcional pelo UUID do estudante"),
+    ] = None,
+) -> DiagnosticEngineEvaluationResponseSchema:
+    """Consulta vw_self_eval_discrepancy, grava explainable_diagnostics com critérios, evidências e limitações explícitas e gera alertas pedagógicos (BE-037)."""
+    return diagnostic_service.evaluate_class_diagnostics(
+        class_id,
+        module_id=module_id,
+        student_id=student_id,
         current_user=current_user,
     )
 

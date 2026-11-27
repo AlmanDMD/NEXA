@@ -40,6 +40,11 @@ from app.repositories.dashboard_repository import (
     DashboardRepositoryDep,
     get_dashboard_repository,
 )
+from app.repositories.diagnostic_repository import (
+    DiagnosticRepository,
+    DiagnosticRepositoryDep,
+    get_diagnostic_repository,
+)
 from app.repositories.enrollment_repository import (
     EnrollmentRepository,
     EnrollmentRepositoryDep,
@@ -93,6 +98,8 @@ __all__ = [
     "CourseRepositoryDep",
     "DashboardRepository",
     "DashboardRepositoryDep",
+    "DiagnosticRepository",
+    "DiagnosticRepositoryDep",
     "EnrollmentRepository",
     "EnrollmentRepositoryDep",
     "LearningModuleRepository",
@@ -115,6 +122,7 @@ __all__ = [
     "get_competency_repository",
     "get_course_repository",
     "get_dashboard_repository",
+    "get_diagnostic_repository",
     "get_enrollment_repository",
     "get_learning_module_repository",
     "get_practical_task_repository",

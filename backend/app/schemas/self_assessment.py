@@ -674,13 +674,51 @@ class HelpRequestSuggestionSchema(BaseResponseSchema):
     )
 
 
+class DiagnosticEvidenceSummarySchema(BaseResponseSchema):
+    """Evidência prática individual (skill_evidences - DB-033) utilizada na geração do diagnóstico explicável (BE-037)."""
+
+    evidence_id: UUID = Field(description="Identificador UUID da evidência em skill_evidences")
+    competency_id: UUID = Field(description="Identificador UUID da competência técnica")
+    source_submission_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da entrega prática (task_submissions) que originou a evidência",
+    )
+    task_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID da atividade prática de oficina (practical_tasks)",
+    )
+    task_title: str | None = Field(
+        default=None,
+        description="Título da atividade prática avaliada pelo docente",
+    )
+    verified_level: Decimal = Field(
+        description="Nível técnico verificado pelo docente na escala de 1.00 a 5.00",
+    )
+    verified_by: UUID = Field(description="Identificador UUID do docente avaliador")
+    recorded_at: datetime = Field(description="Data/hora do registro da evidência prática")
+
+    @field_validator("verified_level", mode="after")
+    @classmethod
+    def quantize_verified_level(cls, value: Decimal) -> Decimal:
+        """Padroniza verified_level com duas casas decimais."""
+        return value.quantize(_DECIMAL_QUANTIZER)
+
+
 class ExplainableDiagnosticItemResponseSchema(BaseResponseSchema):
     """Diagnóstico explicável gerado pelo algoritmo de cruzamento Autoavaliação vs. Evidência Docente (DB-035 / BE-036 / BE-037)."""
 
     id: UUID = Field(description="Identificador UUID do diagnóstico em explainable_diagnostics")
     student_id: UUID = Field(description="Identificador UUID do estudante")
+    student_name: str | None = Field(
+        default=None,
+        description="Nome completo do estudante analisado",
+    )
     class_id: UUID = Field(description="Identificador UUID da turma acadêmica")
     module_id: UUID = Field(description="Identificador UUID do módulo prático")
+    module_title: str | None = Field(
+        default=None,
+        description="Título do módulo prático analisado",
+    )
     competency_id: UUID | None = Field(
         default=None,
         description="Identificador UUID da competência analisada",
@@ -693,6 +731,10 @@ class ExplainableDiagnosticItemResponseSchema(BaseResponseSchema):
         default=None,
         description="Título da competência analisada",
     )
+    competency_category: CompetencyCategory | None = Field(
+        default=None,
+        description="Categoria da competência (TECHNICAL, SAFETY, PROCEDURAL)",
+    )
     self_perceived_level: Decimal = Field(
         description="Nível percebido pelo estudante (1.00 a 5.00)",
     )
@@ -702,10 +744,18 @@ class ExplainableDiagnosticItemResponseSchema(BaseResponseSchema):
     discrepancy_gap: Decimal = Field(
         description="Diferença calculada (self_perceived_level - teacher_verified_level)",
     )
+    confidence_score: int | None = Field(
+        default=None,
+        description="Grau de confiança declarado pelo estudante na autoavaliação (1 a 5)",
+    )
     evidence_count: int = Field(
         default=0,
         ge=0,
         description="Quantidade de evidências práticas (skill_evidences) consideradas no cruzamento",
+    )
+    evidences_used: list[DiagnosticEvidenceSummarySchema] = Field(
+        default_factory=list,
+        description="Lista explícita de evidências práticas (skill_evidences) utilizadas no cálculo do diagnóstico (BE-037)",
     )
     diagnostic_type: DiagnosticType = Field(
         description="Classificação diagnóstica (ALIGNED, OVERCONFIDENCE_RISK, UNDERCONFIDENCE_SUPPORT, INSUFFICIENT_EVIDENCE)",
@@ -719,6 +769,14 @@ class ExplainableDiagnosticItemResponseSchema(BaseResponseSchema):
     recommended_action: str = Field(
         description="Ação pedagógica recomendada ao professor e ao estudante",
     )
+    pedagogical_alert_triggered: bool = Field(
+        default=False,
+        description="Indica se a divergência gerou/atualizou alerta pedagógico (SELF_EVAL_GAP) para competência de segurança ou precisão",
+    )
+    pedagogical_alert_id: UUID | None = Field(
+        default=None,
+        description="Identificador UUID do alerta pedagógico (academic_alerts) quando acionado",
+    )
     generated_at: datetime = Field(description="Data/hora de geração do diagnóstico explicável")
 
     @field_validator(
@@ -731,6 +789,52 @@ class ExplainableDiagnosticItemResponseSchema(BaseResponseSchema):
     def quantize_diagnostic_decimals(cls, value: Decimal) -> Decimal:
         """Padroniza níveis e gap com duas casas decimais."""
         return value.quantize(_DECIMAL_QUANTIZER)
+
+
+class DiagnosticEngineEvaluationResponseSchema(BaseResponseSchema):
+    """Resultado consolidado da execução do Motor de Cruzamento Diagnóstico Explicável (BE-037)."""
+
+    class_id: UUID = Field(description="Identificador UUID da turma avaliada")
+    module_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional de módulo prático avaliado",
+    )
+    student_id: UUID | None = Field(
+        default=None,
+        description="Filtro opcional de estudante avaliado",
+    )
+    evaluated_at: datetime = Field(description="Data/hora da execução do cruzamento diagnóstico")
+    total_diagnostics_generated: int = Field(
+        ge=0,
+        description="Total de diagnósticos por competência processados a partir de vw_self_eval_discrepancy",
+    )
+    aligned_count: int = Field(
+        ge=0,
+        description="Quantidade de competências classificadas como ALIGNED",
+    )
+    overconfidence_risk_count: int = Field(
+        ge=0,
+        description="Quantidade de competências classificadas como OVERCONFIDENCE_RISK",
+    )
+    underconfidence_support_count: int = Field(
+        ge=0,
+        description="Quantidade de competências classificadas como UNDERCONFIDENCE_SUPPORT",
+    )
+    insufficient_evidence_count: int = Field(
+        ge=0,
+        description="Quantidade de competências classificadas como INSUFFICIENT_EVIDENCE",
+    )
+    pedagogical_alerts_triggered_count: int = Field(
+        ge=0,
+        description="Quantidade de alertas pedagógicos (SELF_EVAL_GAP) gerados/atualizados em competências de segurança ou precisão",
+    )
+    ethical_disclaimer: str = Field(
+        description="Nota ética e metodológica garantindo que a autoavaliação nunca é tratada como prova definitiva de competência",
+    )
+    diagnostics: list[ExplainableDiagnosticItemResponseSchema] = Field(
+        default_factory=list,
+        description="Lista detalhada dos diagnósticos explicáveis gravados em explainable_diagnostics",
+    )
 
 
 class StudentSelfAssessmentSubmitResponseSchema(BaseResponseSchema):
@@ -783,6 +887,8 @@ __all__ = [
     "ClassSelfAssessmentFormsQueryParams",
     "ConfidenceScoreInt",
     "DEFAULT_SELF_ASSESSMENT_SCALE",
+    "DiagnosticEngineEvaluationResponseSchema",
+    "DiagnosticEvidenceSummarySchema",
     "ExplainableDiagnosticItemResponseSchema",
     "HelpRequestSuggestionCompetencySchema",
     "HelpRequestSuggestionSchema",

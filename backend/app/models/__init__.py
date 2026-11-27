@@ -36,6 +36,10 @@ from app.models.self_assessment import (
     ExplainableDiagnostic,
     SelfAssessmentForm,
     StudentSelfAssessment,
+    VW_SELF_EVAL_DISCREPANCY_CREATE_SQL,
+    VW_SELF_EVAL_DISCREPANCY_DROP_SQL,
+    VW_SELF_EVAL_DISCREPANCY_NAME,
+    vw_self_eval_discrepancy_table,
 )
 from app.models.student_milestone_history import StudentMilestoneHistory
 from app.models.subject import Subject
@@ -75,9 +79,13 @@ __all__ = [
     "VW_MODULE_ATTENDANCE_RISK_CREATE_SQL",
     "VW_MODULE_ATTENDANCE_RISK_DROP_SQL",
     "VW_MODULE_ATTENDANCE_RISK_NAME",
+    "VW_SELF_EVAL_DISCREPANCY_CREATE_SQL",
+    "VW_SELF_EVAL_DISCREPANCY_DROP_SQL",
+    "VW_SELF_EVAL_DISCREPANCY_NAME",
     "VW_STUDENT_360_PERFORMANCE_CREATE_SQL",
     "VW_STUDENT_360_PERFORMANCE_DROP_SQL",
     "VW_STUDENT_360_PERFORMANCE_NAME",
     "vw_module_attendance_risk_table",
+    "vw_self_eval_discrepancy_table",
     "vw_student_360_performance_table",
 ]

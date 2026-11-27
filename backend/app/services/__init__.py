@@ -109,6 +109,21 @@ from app.services.dashboard_service import (
     DashboardServiceDep,
     get_dashboard_service,
 )
+from app.services.diagnostic_service import (
+    ALIGNED_STRICT_THRESHOLD,
+    CompetencyDiagnosticEvaluationResult,
+    CompetencyDiagnosticInput,
+    DIAGNOSTIC_CLASS_NOT_FOUND_MESSAGE,
+    DIAGNOSTIC_MODULE_NOT_FOUND_MESSAGE,
+    DIAGNOSTIC_TEACHER_FORBIDDEN_MESSAGE,
+    DISCREPANCY_CRITICAL_THRESHOLD,
+    DiagnosticService,
+    DiagnosticServiceDep,
+    SELF_ASSESSMENT_NON_DEFINITIVE_DISCLAIMER,
+    evaluate_competency_discrepancy,
+    get_diagnostic_service,
+    is_safety_or_precision_competency,
+)
 from app.services.enrollment_service import (
     ENROLLMENT_ALREADY_EXISTS_MESSAGE,
     ENROLLMENT_CLASS_FULL_MESSAGE,
@@ -226,6 +241,7 @@ from app.services.teacher_assignment_service import (
 )
 
 __all__ = [
+    "ALIGNED_STRICT_THRESHOLD",
     "ASSESSMENT_CLASS_NOT_FOUND_MESSAGE",
     "ASSESSMENT_INACTIVE_CLASS_MESSAGE",
     "ASSESSMENT_INACTIVE_SUBJECT_MESSAGE",
@@ -268,6 +284,8 @@ __all__ = [
     "COURSE_NOT_FOUND_MESSAGE",
     "ClassLessonService",
     "ClassLessonServiceDep",
+    "CompetencyDiagnosticEvaluationResult",
+    "CompetencyDiagnosticInput",
     "CompetencyService",
     "CompetencyServiceDep",
     "CourseService",
@@ -283,7 +301,13 @@ __all__ = [
     "DashboardService",
     "DashboardServiceDep",
     "DEFAULT_PASSING_SCORE",
+    "DIAGNOSTIC_CLASS_NOT_FOUND_MESSAGE",
+    "DIAGNOSTIC_MODULE_NOT_FOUND_MESSAGE",
+    "DIAGNOSTIC_TEACHER_FORBIDDEN_MESSAGE",
+    "DISCREPANCY_CRITICAL_THRESHOLD",
     "DISCREPANCY_GAP_THRESHOLD",
+    "DiagnosticService",
+    "DiagnosticServiceDep",
     "ENROLLMENT_ALREADY_EXISTS_MESSAGE",
     "ENROLLMENT_CLASS_FULL_MESSAGE",
     "ENROLLMENT_CLASS_NOT_FOUND_MESSAGE",
@@ -355,6 +379,7 @@ __all__ = [
     "SELF_ASSESSMENT_MODULE_COURSE_MISMATCH_MESSAGE",
     "SELF_ASSESSMENT_MODULE_NOT_FOUND_MESSAGE",
     "SELF_ASSESSMENT_MODULE_WITHOUT_COMPETENCIES_MESSAGE",
+    "SELF_ASSESSMENT_NON_DEFINITIVE_DISCLAIMER",
     "SELF_ASSESSMENT_STUDENT_NOT_ENROLLED_MESSAGE",
     "SELF_ASSESSMENT_SUBMIT_DEADLINE_EXPIRED_MESSAGE",
     "SELF_ASSESSMENT_SUBMIT_IDOR_FORBIDDEN_MESSAGE",
@@ -400,6 +425,7 @@ __all__ = [
     "compute_competency_explainable_diagnostic",
     "compute_senai_effective_grade",
     "evaluate_attendance_risk_level",
+    "evaluate_competency_discrepancy",
     "evaluate_student_risk_rules",
     "get_academic_assessment_service",
     "get_academic_class_service",
@@ -409,6 +435,7 @@ __all__ = [
     "get_competency_service",
     "get_course_service",
     "get_dashboard_service",
+    "get_diagnostic_service",
     "get_enrollment_service",
     "get_health_service",
     "get_learning_module_service",
@@ -418,4 +445,5 @@ __all__ = [
     "get_subject_service",
     "get_teacher_assignment_service",
     "is_form_window_open",
+    "is_safety_or_precision_competency",
 ]
