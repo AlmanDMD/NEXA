@@ -1,16 +1,19 @@
-"""Modelos ORM SQLAlchemy 2.0 para Formulários de Autoavaliação (DB-031) e Respostas do Estudante (DB-032)."""
+"""Modelos ORM SQLAlchemy 2.0 para Formulários de Autoavaliação (DB-031), Respostas do Estudante (DB-032) e Diagnósticos Explicáveis (DB-035)."""
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Enum as SAEnum,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -21,6 +24,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.models.base import Base, UUIDPrimaryKeyMixin, _utc_now
+from app.models.learning_module import _coerce_orm_decimal
+from app.schemas.enums import DiagnosticType
 
 if TYPE_CHECKING:
     from app.models.academic_class import AcademicClass
@@ -297,7 +302,167 @@ class StudentSelfAssessment(Base, UUIDPrimaryKeyMixin):
         return normalized or None
 
 
+class ExplainableDiagnostic(Base, UUIDPrimaryKeyMixin):
+    """Diagnóstico pedagógico explicável comparando autoavaliação discente e evidência docente (tabela 'explainable_diagnostics' - DB-035)."""
+
+    __tablename__ = "explainable_diagnostics"
+    __table_args__ = (
+        CheckConstraint(
+            "self_perceived_level >= 1.00 AND self_perceived_level <= 5.00",
+            name="chk_diagnostics_self_level",
+        ),
+        CheckConstraint(
+            "teacher_verified_level >= 1.00 AND teacher_verified_level <= 5.00",
+            name="chk_diagnostics_teacher_level",
+        ),
+        CheckConstraint(
+            "discrepancy_gap >= -4.00 AND discrepancy_gap <= 4.00",
+            name="chk_diagnostics_gap_range",
+        ),
+        CheckConstraint(
+            "length(trim(explanation_text)) >= 10",
+            name="chk_diagnostics_explanation_not_empty",
+        ),
+        CheckConstraint(
+            "length(trim(limitations_note)) >= 10",
+            name="chk_diagnostics_limitations_not_empty",
+        ),
+        CheckConstraint(
+            "length(trim(recommended_action)) >= 5",
+            name="chk_diagnostics_action_not_empty",
+        ),
+        Index(
+            "idx_explainable_diagnostics_class_type",
+            "class_id",
+            "diagnostic_type",
+        ),
+        Index(
+            "idx_explainable_diagnostics_student_module",
+            "student_id",
+            "module_id",
+            "generated_at",
+        ),
+        Index("idx_explainable_diagnostics_competency", "competency_id"),
+    )
+
+    student_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    class_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("classes.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    module_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("learning_modules.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+    )
+    competency_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("competencies.id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=True,
+    )
+    self_perceived_level: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2, asdecimal=True),
+        nullable=False,
+    )
+    teacher_verified_level: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2, asdecimal=True),
+        nullable=False,
+    )
+    discrepancy_gap: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2, asdecimal=True),
+        nullable=False,
+    )
+    diagnostic_type: Mapped[DiagnosticType] = mapped_column(
+        SAEnum(DiagnosticType, name="diagnostic_type_enum", native_enum=True),
+        nullable=False,
+    )
+    explanation_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    limitations_note: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    recommended_action: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utc_now,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    student: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[student_id],
+        lazy="joined",
+        innerjoin=True,
+    )
+    academic_class: Mapped["AcademicClass"] = relationship(
+        "AcademicClass",
+        lazy="joined",
+        innerjoin=True,
+    )
+    module: Mapped["LearningModule"] = relationship(
+        "LearningModule",
+        lazy="joined",
+        innerjoin=True,
+    )
+    competency: Mapped["Competency | None"] = relationship(
+        "Competency",
+        lazy="joined",
+    )
+
+    @validates("self_perceived_level", "teacher_verified_level")
+    def _validate_diagnostic_levels(self, key: str, value: Any) -> Decimal:
+        """Valida que os níveis percebido e verificado estejam entre 1.00 e 5.00."""
+        label = (
+            "O nível autopercebido (self_perceived_level)"
+            if key == "self_perceived_level"
+            else "O nível verificado pelo docente (teacher_verified_level)"
+        )
+        parsed = _coerce_orm_decimal(value, field_label=label)
+        if not (Decimal("1.00") <= parsed <= Decimal("5.00")):
+            raise ValueError(f"{label} deve estar entre 1.00 e 5.00.")
+        return parsed
+
+    @validates("discrepancy_gap")
+    def _validate_discrepancy_gap(self, _key: str, value: Any) -> Decimal:
+        """Valida que a amplitude da discrepância esteja entre -4.00 e 4.00."""
+        parsed = _coerce_orm_decimal(
+            value,
+            field_label="O gap de discrepância (discrepancy_gap)",
+        )
+        if not (Decimal("-4.00") <= parsed <= Decimal("4.00")):
+            raise ValueError(
+                "O gap de discrepância (discrepancy_gap) deve estar entre -4.00 e 4.00."
+            )
+        return parsed
+
+    @validates("explanation_text", "limitations_note", "recommended_action")
+    def _validate_required_texts(self, key: str, value: str) -> str:
+        """Remove espaços extras e valida comprimento mínimo dos campos de inteligência explicável."""
+        min_len = 5 if key == "recommended_action" else 10
+        if not isinstance(value, str):
+            raise ValueError(f"O campo {key} deve ser um texto válido.")
+        normalized = value.strip()
+        if len(normalized) < min_len:
+            raise ValueError(
+                f"O campo {key} deve ter pelo menos {min_len} caracteres."
+            )
+        return normalized
+
+
 __all__ = [
+    "ExplainableDiagnostic",
     "SelfAssessmentForm",
     "StudentSelfAssessment",
 ]

@@ -1,6 +1,7 @@
-"""Serviço de domínio para Cadastro, Reabertura e Consulta de Questionários de Autoavaliação de Competências (BE-035)."""
+"""Serviço de domínio para Cadastro, Reabertura, Submissão e Cruzamento Diagnóstico de Autoavaliação de Competências (BE-035 / BE-036)."""
 
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Final
 from uuid import UUID
 
@@ -14,8 +15,13 @@ from app.core.exceptions import (
 )
 from app.core.logging import logger
 from app.models.base import _utc_now
+from app.models.competency import Competency
 from app.models.module_competency import ModuleCompetency
-from app.models.self_assessment import SelfAssessmentForm, StudentSelfAssessment
+from app.models.self_assessment import (
+    ExplainableDiagnostic,
+    SelfAssessmentForm,
+    StudentSelfAssessment,
+)
 from app.models.user import User
 from app.repositories.self_assessment_repository import (
     SelfAssessmentRepository,
@@ -26,15 +32,26 @@ from app.schemas.class_lesson import (
     LessonSubjectSummarySchema,
 )
 from app.schemas.enrollment import EnrollmentClassSummarySchema
-from app.schemas.enums import ClassStatus, EnrollmentStatus, UserRole
+from app.schemas.enums import (
+    ClassStatus,
+    DiagnosticType,
+    EnrollmentStatus,
+    UserRole,
+)
 from app.schemas.self_assessment import (
     ClassSelfAssessmentFormsListResponseSchema,
     ClassSelfAssessmentFormsQueryParams,
     DEFAULT_SELF_ASSESSMENT_SCALE,
+    ExplainableDiagnosticItemResponseSchema,
+    HelpRequestSuggestionCompetencySchema,
+    HelpRequestSuggestionSchema,
     SelfAssessmentCompetencyItemSchema,
     SelfAssessmentFormCreateSchema,
     SelfAssessmentFormResponseSchema,
     SelfAssessmentFormUpdateWindowSchema,
+    StudentSelfAssessmentAnswerResponseSchema,
+    StudentSelfAssessmentSubmitRequestSchema,
+    StudentSelfAssessmentSubmitResponseSchema,
 )
 
 SELF_ASSESSMENT_FORM_NOT_FOUND_MESSAGE: Final[str] = (
@@ -70,6 +87,139 @@ SELF_ASSESSMENT_INACTIVE_SUBJECT_MESSAGE: Final[str] = (
 SELF_ASSESSMENT_MODULE_COURSE_MISMATCH_MESSAGE: Final[str] = (
     "O módulo prático informado não pertence ao curso técnico da turma selecionada."
 )
+SELF_ASSESSMENT_SUBMIT_IDOR_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso negado: não é permitido submeter respostas de autoavaliação em nome de outro estudante."
+)
+SELF_ASSESSMENT_SUBMIT_ROLE_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso negado: apenas usuários com perfil de estudante (STUDENT) podem submeter respostas de autoavaliação."
+)
+SELF_ASSESSMENT_SUBMIT_INACTIVE_FORM_MESSAGE: Final[str] = (
+    "Não é possível enviar respostas: o questionário de autoavaliação está inativo."
+)
+SELF_ASSESSMENT_SUBMIT_NOT_OPEN_YET_MESSAGE: Final[str] = (
+    "Não é possível enviar respostas: o questionário de autoavaliação ainda não foi aberto para submissões."
+)
+SELF_ASSESSMENT_SUBMIT_DEADLINE_EXPIRED_MESSAGE: Final[str] = (
+    "Não é possível enviar respostas: o prazo do questionário de autoavaliação já foi encerrado."
+)
+SELF_ASSESSMENT_SUBMIT_INVALID_COMPETENCY_MESSAGE: Final[str] = (
+    "Uma ou mais competências informadas na submissão não pertencem ao módulo prático deste questionário."
+)
+HIGH_DIFFICULTY_LEVEL_THRESHOLD: Final[int] = 2
+DISCREPANCY_GAP_THRESHOLD: Final[Decimal] = Decimal("1.50")
+_DECIMAL_QUANTIZER: Final[Decimal] = Decimal("0.01")
+
+
+def _quantize_level(value: Decimal) -> Decimal:
+    """Arredonda nível numérico para duas casas decimais."""
+    return value.quantize(_DECIMAL_QUANTIZER, rounding=ROUND_HALF_UP)
+
+
+def compute_competency_explainable_diagnostic(
+    *,
+    competency: Competency,
+    module_title: str,
+    perceived_level: int,
+    confidence_score: int,
+    difficulty_notes: str | None,
+    avg_verified_level: Decimal | None,
+    evidence_count: int,
+) -> tuple[Decimal, Decimal, Decimal, DiagnosticType, str, str, str]:
+    """Executa o cruzamento diagnóstico explicável entre autoavaliação discente e evidências práticas do docente (BE-036 / BE-037)."""
+    self_level = _quantize_level(Decimal(perceived_level))
+
+    if evidence_count <= 0 or avg_verified_level is None:
+        teacher_level = self_level
+        gap = Decimal("0.00")
+        diag_type = DiagnosticType.INSUFFICIENT_EVIDENCE
+        explanation_text = (
+            f"Na competência '{competency.code} — {competency.title}' do módulo '{module_title}', "
+            f"o estudante declarou nível percebido {self_level:.2f}/5.00 (confiança {confidence_score}/5), "
+            "porém ainda não há evidências práticas avaliadas pelo docente (skill_evidences = 0) para comparação objetiva."
+        )
+        limitations_note = (
+            "Análise preliminar baseada exclusivamente na autopercepção discente (0 evidências práticas registradas). "
+            "A autoavaliação tem caráter formativo e não substitui a verificação técnica em bancada pelo professor."
+        )
+        if perceived_level <= HIGH_DIFFICULTY_LEVEL_THRESHOLD:
+            recommended_action = (
+                "Priorizar acompanhamento preventivo em bancada na próxima aula prática e considerar abertura de pedido de apoio pedagógico."
+            )
+        else:
+            recommended_action = (
+                "Aguardar a avaliação da próxima entrega prática com rubricas (BE-025) para consolidar o cruzamento diagnóstico."
+            )
+        return (
+            self_level,
+            teacher_level,
+            gap,
+            diag_type,
+            explanation_text,
+            limitations_note,
+            recommended_action,
+        )
+
+    teacher_level = min(
+        Decimal("5.00"),
+        max(Decimal("1.00"), _quantize_level(avg_verified_level)),
+    )
+    gap = _quantize_level(self_level - teacher_level)
+
+    if gap >= DISCREPANCY_GAP_THRESHOLD:
+        diag_type = DiagnosticType.OVERCONFIDENCE_RISK
+        explanation_text = (
+            f"Divergência positiva (superestimação) identificada em '{competency.code} — {competency.title}': "
+            f"nível autopercebido de {self_level:.2f}/5.00 (confiança {confidence_score}/5) frente à média verificada "
+            f"pelo docente de {teacher_level:.2f}/5.00 em {evidence_count} evidência(s) prática(s) (gap de +{gap:.2f})."
+        )
+        recommended_action = (
+            "Realizar calibração de critérios técnicos e revisão de normas de segurança/tolerância na oficina com feedback individualizado."
+        )
+    elif gap <= -DISCREPANCY_GAP_THRESHOLD:
+        diag_type = DiagnosticType.UNDERCONFIDENCE_SUPPORT
+        explanation_text = (
+            f"Divergência negativa (subestimação/insegurança) identificada em '{competency.code} — {competency.title}': "
+            f"o estudante declarou nível percebido de {self_level:.2f}/5.00 (confiança {confidence_score}/5), mas demonstrou "
+            f"desempenho prático superior de {teacher_level:.2f}/5.00 em {evidence_count} evidência(s) verificada(s) (gap de {gap:.2f})."
+        )
+        recommended_action = (
+            "Reforçar feedback positivo sobre o desempenho real em bancada para fortalecer a autonomia e a segurança técnica do estudante."
+        )
+    else:
+        diag_type = DiagnosticType.ALIGNED
+        explanation_text = (
+            f"Percepção alinhada na competência '{competency.code} — {competency.title}': "
+            f"nível autopercebido de {self_level:.2f}/5.00 (confiança {confidence_score}/5) convergente com a média "
+            f"verificada pelo docente de {teacher_level:.2f}/5.00 em {evidence_count} evidência(s) (gap de {gap:+.2f})."
+        )
+        if perceived_level <= HIGH_DIFFICULTY_LEVEL_THRESHOLD:
+            recommended_action = (
+                "Estudante e docente reconhecem dificuldade técnica atual (nível <= 2): recomendar prática assistida ou mentoria direcionada."
+            )
+        else:
+            recommended_action = (
+                "Manter progressão prática nas atividades de oficina do módulo com monitoramento contínuo das rubricas."
+            )
+
+    difficulty_excerpt = (
+        f" Relato do estudante: '{difficulty_notes}'."
+        if difficulty_notes
+        else ""
+    )
+    limitations_note = (
+        f"Diagnóstico explicável baseado em {evidence_count} evidência(s) prática(s) registrada(s) até o momento e na autoavaliação reflexiva "
+        f"(limiar de discrepância |gap| >= {DISCREPANCY_GAP_THRESHOLD:.2f}). Indicador pedagógico de apoio à decisão docente, não punitivo.{difficulty_excerpt}"
+    )
+
+    return (
+        self_level,
+        teacher_level,
+        gap,
+        diag_type,
+        explanation_text,
+        limitations_note,
+        recommended_action,
+    )
 
 
 def _ensure_utc(value: datetime) -> datetime:
@@ -513,6 +663,282 @@ class SelfAssessmentService:
             data=staff_forms,
         )
 
+    def submit_student_self_assessment(
+        self,
+        payload: StudentSelfAssessmentSubmitRequestSchema,
+        *,
+        current_user: User,
+    ) -> StudentSelfAssessmentSubmitResponseSchema:
+        """Recebe e persiste as respostas de autoavaliação do estudante logado, sugere pedido de ajuda se perceived_level <= 2 e dispara o cruzamento diagnóstico (BE-036)."""
+        if current_user.role != UserRole.STUDENT:
+            raise ForbiddenException(
+                message=SELF_ASSESSMENT_SUBMIT_ROLE_FORBIDDEN_MESSAGE
+            )
+
+        if payload.student_id is not None and payload.student_id != current_user.id:
+            raise ForbiddenException(
+                message=SELF_ASSESSMENT_SUBMIT_IDOR_FORBIDDEN_MESSAGE
+            )
+
+        form = self._repository.get_form_by_id(payload.form_id)
+        if form is None:
+            raise NotFoundException(message=SELF_ASSESSMENT_FORM_NOT_FOUND_MESSAGE)
+
+        if form.academic_class.status != ClassStatus.ACTIVE:
+            raise UnprocessableEntityException(
+                message=SELF_ASSESSMENT_INACTIVE_CLASS_MESSAGE
+            )
+
+        enrollment = self._repository.get_enrollment_by_class_and_student(
+            class_id=form.class_id,
+            student_id=current_user.id,
+        )
+        if enrollment is None or enrollment.status != EnrollmentStatus.ACTIVE:
+            raise ForbiddenException(
+                message=SELF_ASSESSMENT_STUDENT_NOT_ENROLLED_MESSAGE
+            )
+
+        now = _utc_now()
+        if not form.is_active:
+            raise UnprocessableEntityException(
+                message=SELF_ASSESSMENT_SUBMIT_INACTIVE_FORM_MESSAGE
+            )
+
+        opens_utc = _ensure_utc(form.opens_at)
+        closes_utc = _ensure_utc(form.closes_at)
+        now_utc = _ensure_utc(now)
+
+        if now_utc < opens_utc:
+            raise UnprocessableEntityException(
+                message=SELF_ASSESSMENT_SUBMIT_NOT_OPEN_YET_MESSAGE
+            )
+        if now_utc > closes_utc:
+            raise UnprocessableEntityException(
+                message=SELF_ASSESSMENT_SUBMIT_DEADLINE_EXPIRED_MESSAGE
+            )
+
+        module_competencies_by_id: dict[UUID, Competency] = {
+            mc.competency_id: mc.competency
+            for mc in form.module.module_competencies
+        }
+        if not module_competencies_by_id:
+            raise UnprocessableEntityException(
+                message=SELF_ASSESSMENT_MODULE_WITHOUT_COMPETENCIES_MESSAGE
+            )
+
+        for item in payload.responses:
+            if item.competency_id not in module_competencies_by_id:
+                raise BadRequestException(
+                    message=SELF_ASSESSMENT_SUBMIT_INVALID_COMPETENCY_MESSAGE
+                )
+
+        answer_tuples = [
+            (
+                item.competency_id,
+                item.perceived_level,
+                item.confidence_score,
+                item.difficulty_notes,
+            )
+            for item in payload.responses
+        ]
+        persisted_answers, created_count, updated_count = (
+            self._repository.upsert_student_self_assessment_responses(
+                form_id=form.id,
+                student_id=current_user.id,
+                answers=answer_tuples,
+                submitted_at=now_utc,
+            )
+        )
+
+        # Dispara o algoritmo de cruzamento diagnóstico (BE-037) para as competências respondidas
+        submitted_comp_ids = [item.competency_id for item in payload.responses]
+        evidence_stats_by_comp = self._repository.get_student_skill_evidence_stats(
+            student_id=current_user.id,
+            competency_ids=submitted_comp_ids,
+        )
+
+        diagnostic_tuples: list[
+            tuple[
+                UUID,
+                Decimal,
+                Decimal,
+                Decimal,
+                DiagnosticType,
+                str,
+                str,
+                str,
+            ]
+        ] = []
+        for item in payload.responses:
+            comp = module_competencies_by_id[item.competency_id]
+            avg_verified, evidence_count = evidence_stats_by_comp.get(
+                item.competency_id,
+                (None, 0),
+            )
+            (
+                self_lvl,
+                teacher_lvl,
+                gap,
+                diag_type,
+                explanation_text,
+                limitations_note,
+                recommended_action,
+            ) = compute_competency_explainable_diagnostic(
+                competency=comp,
+                module_title=form.module.title,
+                perceived_level=item.perceived_level,
+                confidence_score=item.confidence_score,
+                difficulty_notes=item.difficulty_notes,
+                avg_verified_level=avg_verified,
+                evidence_count=evidence_count,
+            )
+            diagnostic_tuples.append(
+                (
+                    item.competency_id,
+                    self_lvl,
+                    teacher_lvl,
+                    gap,
+                    diag_type,
+                    explanation_text,
+                    limitations_note,
+                    recommended_action,
+                )
+            )
+
+        persisted_diagnostics = self._repository.upsert_explainable_diagnostics(
+            student_id=current_user.id,
+            class_id=form.class_id,
+            module_id=form.module_id,
+            diagnostic_items=diagnostic_tuples,
+            generated_at=now_utc,
+        )
+
+        all_student_responses = self._repository.list_student_responses_for_form(
+            form_id=form.id,
+            student_id=current_user.id,
+        )
+        answered_comp_ids = {
+            resp.competency_id
+            for resp in all_student_responses
+            if resp.competency_id in module_competencies_by_id
+        }
+        is_form_completed = len(answered_comp_ids) >= len(module_competencies_by_id)
+
+        responses_schemas: list[StudentSelfAssessmentAnswerResponseSchema] = []
+        flagged_for_help: list[HelpRequestSuggestionCompetencySchema] = []
+
+        for ans in persisted_answers:
+            comp = module_competencies_by_id[ans.competency_id]
+            is_high_diff = ans.perceived_level <= HIGH_DIFFICULTY_LEVEL_THRESHOLD
+            if is_high_diff:
+                flagged_for_help.append(
+                    HelpRequestSuggestionCompetencySchema(
+                        competency_id=comp.id,
+                        competency_code=comp.code,
+                        competency_title=comp.title,
+                        perceived_level=ans.perceived_level,
+                        confidence_score=ans.confidence_score,
+                        difficulty_notes=ans.difficulty_notes,
+                    )
+                )
+            responses_schemas.append(
+                StudentSelfAssessmentAnswerResponseSchema(
+                    id=ans.id,
+                    form_id=ans.form_id,
+                    student_id=ans.student_id,
+                    competency_id=ans.competency_id,
+                    competency_code=comp.code,
+                    competency_title=comp.title,
+                    competency_category=comp.category,
+                    perceived_level=ans.perceived_level,
+                    confidence_score=ans.confidence_score,
+                    difficulty_notes=ans.difficulty_notes,
+                    is_high_difficulty=is_high_diff,
+                    submitted_at=_ensure_utc(ans.submitted_at),
+                )
+            )
+
+        should_suggest_help = len(flagged_for_help) > 0
+        help_message = (
+            "Identificamos que você relatou dificuldade mais alta (nível 1 ou 2) em uma ou mais competências práticas deste módulo. "
+            "Caso deseje, você pode abrir um pedido confidencial de apoio pedagógico para receber orientação individual do professor na oficina."
+            if should_suggest_help
+            else None
+        )
+        help_suggestion = HelpRequestSuggestionSchema(
+            should_suggest_help_request=should_suggest_help,
+            high_difficulty_count=len(flagged_for_help),
+            suggested_category="PRACTICAL_DIFFICULTY",
+            suggested_endpoint="/api/v1/help-requests",
+            subject_id=form.module.subject_id,
+            module_id=form.module_id,
+            message=help_message,
+            flagged_competencies=flagged_for_help,
+        )
+
+        diagnostics_schemas: list[ExplainableDiagnosticItemResponseSchema] = []
+        for diag in persisted_diagnostics:
+            comp = (
+                module_competencies_by_id.get(diag.competency_id)
+                if diag.competency_id is not None
+                else None
+            )
+            _, ev_count = (
+                evidence_stats_by_comp.get(diag.competency_id, (None, 0))
+                if diag.competency_id is not None
+                else (None, 0)
+            )
+            diagnostics_schemas.append(
+                ExplainableDiagnosticItemResponseSchema(
+                    id=diag.id,
+                    student_id=diag.student_id,
+                    class_id=diag.class_id,
+                    module_id=diag.module_id,
+                    competency_id=diag.competency_id,
+                    competency_code=comp.code if comp is not None else None,
+                    competency_title=comp.title if comp is not None else None,
+                    self_perceived_level=diag.self_perceived_level,
+                    teacher_verified_level=diag.teacher_verified_level,
+                    discrepancy_gap=diag.discrepancy_gap,
+                    evidence_count=ev_count,
+                    diagnostic_type=diag.diagnostic_type,
+                    explanation_text=diag.explanation_text,
+                    limitations_note=diag.limitations_note,
+                    recommended_action=diag.recommended_action,
+                    generated_at=_ensure_utc(diag.generated_at),
+                )
+            )
+
+        logger.bind(
+            form_id=str(form.id),
+            student_id=str(current_user.id),
+            class_id=str(form.class_id),
+            module_id=str(form.module_id),
+            total_submitted=len(responses_schemas),
+            created_count=created_count,
+            updated_count=updated_count,
+            suggest_help_request=should_suggest_help,
+            diagnostics_count=len(diagnostics_schemas),
+        ).info("Autoavaliação de competências submetida pelo estudante com cruzamento diagnóstico.")
+
+        return StudentSelfAssessmentSubmitResponseSchema(
+            form_id=form.id,
+            student_id=current_user.id,
+            class_id=form.class_id,
+            module_id=form.module_id,
+            subject_id=form.module.subject_id,
+            total_submitted=len(responses_schemas),
+            created_count=created_count,
+            updated_count=updated_count,
+            is_form_completed=is_form_completed,
+            suggest_help_request=should_suggest_help,
+            help_request_suggestion=help_suggestion,
+            diagnostic_triggered=True,
+            diagnostics=diagnostics_schemas,
+            responses=responses_schemas,
+            submitted_at=now_utc,
+        )
+
 
 def get_self_assessment_service(
     repository: SelfAssessmentRepositoryDep,
@@ -527,6 +953,8 @@ SelfAssessmentServiceDep = Annotated[
 ]
 
 __all__ = [
+    "DISCREPANCY_GAP_THRESHOLD",
+    "HIGH_DIFFICULTY_LEVEL_THRESHOLD",
     "SELF_ASSESSMENT_CLASS_NOT_FOUND_MESSAGE",
     "SELF_ASSESSMENT_CLASS_TEACHER_FORBIDDEN_MESSAGE",
     "SELF_ASSESSMENT_FORM_NOT_FOUND_MESSAGE",
@@ -537,9 +965,16 @@ __all__ = [
     "SELF_ASSESSMENT_MODULE_NOT_FOUND_MESSAGE",
     "SELF_ASSESSMENT_MODULE_WITHOUT_COMPETENCIES_MESSAGE",
     "SELF_ASSESSMENT_STUDENT_NOT_ENROLLED_MESSAGE",
+    "SELF_ASSESSMENT_SUBMIT_DEADLINE_EXPIRED_MESSAGE",
+    "SELF_ASSESSMENT_SUBMIT_IDOR_FORBIDDEN_MESSAGE",
+    "SELF_ASSESSMENT_SUBMIT_INACTIVE_FORM_MESSAGE",
+    "SELF_ASSESSMENT_SUBMIT_INVALID_COMPETENCY_MESSAGE",
+    "SELF_ASSESSMENT_SUBMIT_NOT_OPEN_YET_MESSAGE",
+    "SELF_ASSESSMENT_SUBMIT_ROLE_FORBIDDEN_MESSAGE",
     "SELF_ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE",
     "SelfAssessmentService",
     "SelfAssessmentServiceDep",
+    "compute_competency_explainable_diagnostic",
     "get_self_assessment_service",
     "is_form_window_open",
 ]

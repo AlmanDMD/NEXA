@@ -32,7 +32,11 @@ from app.models.practical_task import (
     TaskCriterion,
     TaskSubmission,
 )
-from app.models.self_assessment import SelfAssessmentForm, StudentSelfAssessment
+from app.models.self_assessment import (
+    ExplainableDiagnostic,
+    SelfAssessmentForm,
+    StudentSelfAssessment,
+)
 from app.models.student_milestone_history import StudentMilestoneHistory
 from app.models.subject import Subject
 from app.models.teacher_assignment import TeacherAssignment
@@ -50,6 +54,7 @@ __all__ = [
     "Competency",
     "Course",
     "Enrollment",
+    "ExplainableDiagnostic",
     "LearningModule",
     "ModuleCompetency",
     "PracticalTask",

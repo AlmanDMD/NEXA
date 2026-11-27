@@ -2,21 +2,29 @@
 
 from collections.abc import Sequence
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import DbSessionDep
 from app.models.academic_class import AcademicClass
+from app.models.base import _utc_now
 from app.models.competency import Competency
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
-from app.models.self_assessment import SelfAssessmentForm, StudentSelfAssessment
+from app.models.practical_task import SkillEvidence
+from app.models.self_assessment import (
+    ExplainableDiagnostic,
+    SelfAssessmentForm,
+    StudentSelfAssessment,
+)
 from app.models.teacher_assignment import TeacherAssignment
+from app.schemas.enums import DiagnosticType
 
 
 class SelfAssessmentRepository:
@@ -287,6 +295,190 @@ class SelfAssessmentRepository:
         )
         records = list(self._session.scalars(stmt).all())
         return {(item.form_id, item.competency_id): item for item in records}
+
+    def list_student_responses_for_form(
+        self,
+        *,
+        form_id: UUID,
+        student_id: UUID,
+    ) -> list[StudentSelfAssessment]:
+        """Lista todas as respostas de autoavaliação de um estudante em um formulário específico."""
+        stmt = (
+            select(StudentSelfAssessment)
+            .options(joinedload(StudentSelfAssessment.competency))
+            .where(
+                StudentSelfAssessment.form_id == form_id,
+                StudentSelfAssessment.student_id == student_id,
+            )
+            .order_by(
+                StudentSelfAssessment.submitted_at.asc(),
+                StudentSelfAssessment.id.asc(),
+            )
+        )
+        return list(self._session.scalars(stmt).all())
+
+    def upsert_student_self_assessment_responses(
+        self,
+        *,
+        form_id: UUID,
+        student_id: UUID,
+        answers: Sequence[tuple[UUID, int, int, str | None]],
+        submitted_at: datetime | None = None,
+    ) -> tuple[list[StudentSelfAssessment], int, int]:
+        """Grava ou atualiza respostas em student_self_assessments (DB-032) respeitando UNIQUE(form_id, student_id, competency_id)."""
+        now = submitted_at if submitted_at is not None else _utc_now()
+        existing_records = self.list_student_responses_for_form(
+            form_id=form_id,
+            student_id=student_id,
+        )
+        existing_by_comp: dict[UUID, StudentSelfAssessment] = {
+            rec.competency_id: rec for rec in existing_records
+        }
+
+        created_count = 0
+        updated_count = 0
+        persisted: list[StudentSelfAssessment] = []
+
+        for competency_id, perceived_level, confidence_score, difficulty_notes in answers:
+            existing = existing_by_comp.get(competency_id)
+            if existing is None:
+                entity = StudentSelfAssessment(
+                    form_id=form_id,
+                    student_id=student_id,
+                    competency_id=competency_id,
+                    perceived_level=perceived_level,
+                    confidence_score=confidence_score,
+                    difficulty_notes=difficulty_notes,
+                    submitted_at=now,
+                )
+                self._session.add(entity)
+                created_count += 1
+                persisted.append(entity)
+            else:
+                existing.perceived_level = perceived_level
+                existing.confidence_score = confidence_score
+                existing.difficulty_notes = difficulty_notes
+                existing.submitted_at = now
+                self._session.add(existing)
+                updated_count += 1
+                persisted.append(existing)
+
+        self._session.flush()
+        return persisted, created_count, updated_count
+
+    def get_student_skill_evidence_stats(
+        self,
+        *,
+        student_id: UUID,
+        competency_ids: Sequence[UUID],
+    ) -> dict[UUID, tuple[Decimal, int]]:
+        """Retorna mapa {competency_id: (avg_verified_level, evidence_count)} a partir de skill_evidences (DB-033)."""
+        unique_comp_ids = list(dict.fromkeys(competency_ids))
+        if not unique_comp_ids:
+            return {}
+        stmt = (
+            select(
+                SkillEvidence.competency_id,
+                func.avg(SkillEvidence.verified_level),
+                func.count(SkillEvidence.id),
+            )
+            .where(
+                SkillEvidence.student_id == student_id,
+                SkillEvidence.competency_id.in_(unique_comp_ids),
+            )
+            .group_by(SkillEvidence.competency_id)
+        )
+        rows = self._session.execute(stmt).all()
+        result: dict[UUID, tuple[Decimal, int]] = {}
+        for comp_id, avg_val, count_val in rows:
+            if avg_val is not None and int(count_val or 0) > 0:
+                result[comp_id] = (Decimal(str(avg_val)), int(count_val))
+        return result
+
+    def upsert_explainable_diagnostics(
+        self,
+        *,
+        student_id: UUID,
+        class_id: UUID,
+        module_id: UUID,
+        diagnostic_items: Sequence[
+            tuple[
+                UUID,
+                Decimal,
+                Decimal,
+                Decimal,
+                DiagnosticType,
+                str,
+                str,
+                str,
+            ]
+        ],
+        generated_at: datetime | None = None,
+    ) -> list[ExplainableDiagnostic]:
+        """Persiste ou atualiza diagnósticos explicáveis em explainable_diagnostics (DB-035) por (student_id, class_id, module_id, competency_id)."""
+        now = generated_at if generated_at is not None else _utc_now()
+        comp_ids = [item[0] for item in diagnostic_items]
+        existing_stmt = (
+            select(ExplainableDiagnostic)
+            .options(joinedload(ExplainableDiagnostic.competency))
+            .where(
+                ExplainableDiagnostic.student_id == student_id,
+                ExplainableDiagnostic.class_id == class_id,
+                ExplainableDiagnostic.module_id == module_id,
+                ExplainableDiagnostic.competency_id.in_(comp_ids),
+            )
+        )
+        existing_by_comp: dict[UUID, ExplainableDiagnostic] = {
+            diag.competency_id: diag
+            for diag in self._session.scalars(existing_stmt).all()
+            if diag.competency_id is not None
+        }
+
+        persisted: list[ExplainableDiagnostic] = []
+        for (
+            competency_id,
+            self_level,
+            teacher_level,
+            gap,
+            diag_type,
+            explanation_text,
+            limitations_note,
+            recommended_action,
+        ) in diagnostic_items:
+            existing = existing_by_comp.get(competency_id)
+            if existing is None:
+                entity = ExplainableDiagnostic(
+                    student_id=student_id,
+                    class_id=class_id,
+                    module_id=module_id,
+                    competency_id=competency_id,
+                    self_perceived_level=self_level,
+                    teacher_verified_level=teacher_level,
+                    discrepancy_gap=gap,
+                    diagnostic_type=diag_type,
+                    explanation_text=explanation_text,
+                    limitations_note=limitations_note,
+                    recommended_action=recommended_action,
+                    generated_at=now,
+                )
+                self._session.add(entity)
+                persisted.append(entity)
+            else:
+                existing.self_perceived_level = self_level
+                existing.teacher_verified_level = teacher_level
+                existing.discrepancy_gap = gap
+                existing.diagnostic_type = diag_type
+                existing.explanation_text = explanation_text
+                existing.limitations_note = limitations_note
+                existing.recommended_action = recommended_action
+                existing.generated_at = now
+                self._session.add(existing)
+                persisted.append(existing)
+
+        self._session.commit()
+        for diag in persisted:
+            self._session.refresh(diag)
+        return persisted
 
 
 def get_self_assessment_repository(
