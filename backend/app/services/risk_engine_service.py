@@ -12,17 +12,25 @@ from fastapi import Depends
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.logging import logger
 from app.models.academic_alert import AcademicAlert
+from app.models.audit_log import AuditLog
 from app.models.base import _utc_now
 from app.models.user import User
+from app.repositories.audit_repository import AuditRepository
 from app.repositories.risk_engine_repository import (
     RiskEngineRepository,
     RiskEngineRepositoryDep,
 )
-from app.schemas.enums import AlertCategory, RiskLevel, UserRole
-from app.schemas.dashboard import DashboardStudentProfileSchema
+from app.schemas.enums import AlertCategory, AlertStatus, RiskLevel, UserRole
+from app.schemas.dashboard import (
+    AlertInterventionAuditItemSchema,
+    DashboardStudentProfileSchema,
+)
 from app.schemas.enrollment import EnrollmentClassSummarySchema
 from app.schemas.risk_engine import (
+    AcademicAlertResolutionResponseSchema,
+    AcademicAlertResolveRequestSchema,
     AcademicAlertResponseSchema,
+    AlertResolverSummarySchema,
     AtRiskAlertModuleSummarySchema,
     AtRiskStudentAlertItemSchema,
     AtRiskStudentCurrentMetricsSchema,
@@ -33,7 +41,9 @@ from app.schemas.risk_engine import (
     RiskRuleEvaluationItemSchema,
     StudentRiskEvaluationResultSchema,
 )
+from app.services.audit_service import AuditService, AuditServiceDep
 
+RISK_ENGINE_ALERT_NOT_FOUND_MESSAGE: Final[str] = "Alerta acadêmico não encontrado."
 RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE: Final[str] = "Turma acadêmica não encontrada."
 RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE: Final[str] = (
     "Módulo de aprendizagem prática não encontrado."
@@ -321,11 +331,68 @@ def evaluate_student_risk_rules(
     return overall_risk, triggered_rules
 
 
+def map_alert_audit_logs_to_schema(
+    audit_logs: Sequence[AuditLog],
+) -> list[AlertInterventionAuditItemSchema]:
+    """Converte logs imutáveis de audit_logs relacionados a alertas em itens tipados de histórico (BE-039)."""
+    items: list[AlertInterventionAuditItemSchema] = []
+    for entry in audit_logs:
+        old_vals = entry.old_values if isinstance(entry.old_values, dict) else {}
+        new_vals = entry.new_values if isinstance(entry.new_values, dict) else {}
+
+        raw_prev = old_vals.get("status")
+        prev_status: AlertStatus | None = None
+        if raw_prev:
+            try:
+                prev_status = AlertStatus(str(raw_prev))
+            except ValueError:
+                prev_status = None
+
+        raw_new = new_vals.get("status")
+        try:
+            new_status = (
+                AlertStatus(str(raw_new)) if raw_new else AlertStatus.RESOLVED
+            )
+        except ValueError:
+            new_status = AlertStatus.RESOLVED
+
+        actor = entry.user
+        actor_name = (
+            actor.profile.full_name
+            if actor is not None and actor.profile is not None
+            else (actor.email if actor is not None else None)
+        )
+        items.append(
+            AlertInterventionAuditItemSchema(
+                audit_id=entry.id,
+                action=entry.action,
+                previous_status=prev_status,
+                new_status=new_status,
+                resolution_notes=str(new_vals.get("resolution_notes") or ""),
+                actor_id=entry.user_id,
+                actor_name=actor_name,
+                actor_role=actor.role if actor is not None else None,
+                ip_address=entry.ip_address,
+                recorded_at=entry.created_at,
+            )
+        )
+    return items
+
+
 class RiskEngineService:
     """Serviço transparente e explicável de identificação precoce de risco acadêmico (BE-032)."""
 
-    def __init__(self, repository: RiskEngineRepository) -> None:
+    def __init__(
+        self,
+        repository: RiskEngineRepository,
+        audit_service: AuditService | None = None,
+    ) -> None:
         self._repository = repository
+        self._audit_service = (
+            audit_service
+            if audit_service is not None
+            else AuditService(repository=AuditRepository(session=repository.session))
+        )
 
     @staticmethod
     def _to_alert_response(alert: AcademicAlert) -> AcademicAlertResponseSchema:
@@ -341,6 +408,8 @@ class RiskEngineService:
             explainable_reason=alert.explainable_reason,
             metric_snapshot=alert.metric_snapshot,
             status=alert.status,
+            resolved_by=alert.resolved_by,
+            resolution_notes=alert.resolution_notes,
             ethical_disclaimer=ETHICAL_PEDAGOGICAL_DISCLAIMER,
             created_at=alert.created_at,
         )
@@ -704,6 +773,8 @@ class RiskEngineService:
                     risk_level=alert.risk_level,
                     alert_category=alert.alert_category,
                     status=alert.status,
+                    resolved_by=alert.resolved_by,
+                    resolution_notes=alert.resolution_notes,
                     explainable_reason=alert.explainable_reason,
                     recommended_action=recommended,
                     suggested_pedagogical_action=suggested,
@@ -747,12 +818,145 @@ class RiskEngineService:
             ethical_disclaimer=ETHICAL_PEDAGOGICAL_DISCLAIMER,
         )
 
+    def _get_authorized_alert(
+        self,
+        alert_id: UUID,
+        *,
+        current_user: User,
+    ) -> AcademicAlert:
+        """Busca alerta validando existência (404) e vínculo docente com a turma (403)."""
+        alert = self._repository.get_alert_by_id(alert_id)
+        if alert is None:
+            raise NotFoundException(message=RISK_ENGINE_ALERT_NOT_FOUND_MESSAGE)
+
+        if (
+            current_user.role == UserRole.TEACHER
+            and not self._repository.is_teacher_assigned_to_class(
+                teacher_id=current_user.id,
+                class_id=alert.class_id,
+            )
+        ):
+            raise ForbiddenException(message=RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE)
+        return alert
+
+    def resolve_academic_alert(
+        self,
+        alert_id: UUID,
+        payload: AcademicAlertResolveRequestSchema,
+        *,
+        current_user: User,
+        ip_address: str | None = None,
+    ) -> AcademicAlertResolutionResponseSchema:
+        """Assume acompanhamento (ACKNOWLEDGED) ou encerra (RESOLVED) um alerta acadêmico gravando auditoria (BE-039)."""
+        alert = self._get_authorized_alert(alert_id, current_user=current_user)
+        previous_status = alert.status
+        now = _utc_now()
+
+        old_values: dict[str, Any] = {
+            "status": previous_status.value,
+            "resolved_by": str(alert.resolved_by) if alert.resolved_by else None,
+            "resolution_notes": alert.resolution_notes,
+        }
+        new_values: dict[str, Any] = {
+            "status": payload.status.value,
+            "resolved_by": str(current_user.id),
+            "resolution_notes": payload.resolution_notes,
+            "student_id": str(alert.student_id),
+            "class_id": str(alert.class_id),
+            "module_id": str(alert.module_id) if alert.module_id else None,
+        }
+
+        self._repository.update_alert_resolution(
+            alert,
+            status=payload.status,
+            resolved_by=current_user.id,
+            resolution_notes=payload.resolution_notes,
+        )
+
+        action_name = (
+            "ACADEMIC_ALERT_ACKNOWLEDGED"
+            if payload.status == AlertStatus.ACKNOWLEDGED
+            else "ACADEMIC_ALERT_RESOLVED"
+        )
+        audit_entry = self._audit_service.log_action(
+            user_id=current_user.id,
+            action=action_name,
+            entity="academic_alerts",
+            entity_id=str(alert.id),
+            old_values=old_values,
+            new_values=new_values,
+            ip_address=ip_address,
+            commit=False,
+        )
+        self._repository.commit()
+
+        audit_logs = self._repository.list_alert_audit_logs(alert.id)
+        intervention_history = map_alert_audit_logs_to_schema(audit_logs)
+        resolver_name = (
+            current_user.profile.full_name
+            if current_user.profile is not None
+            else None
+        )
+
+        logger.bind(
+            alert_id=str(alert.id),
+            student_id=str(alert.student_id),
+            class_id=str(alert.class_id),
+            previous_status=previous_status.value,
+            new_status=alert.status.value,
+            resolved_by=str(current_user.id),
+            audit_log_id=str(audit_entry.id),
+        ).info("Intervenção em alerta acadêmico registrada com sucesso (BE-039).")
+
+        return AcademicAlertResolutionResponseSchema(
+            id=alert.id,
+            alert_id=alert.id,
+            student_id=alert.student_id,
+            enrollment_id=alert.enrollment_id,
+            class_id=alert.class_id,
+            module_id=alert.module_id,
+            risk_level=alert.risk_level,
+            alert_category=alert.alert_category,
+            explainable_reason=alert.explainable_reason,
+            metric_snapshot=alert.metric_snapshot,
+            status=alert.status,
+            previous_status=previous_status,
+            resolved_by=current_user.id,
+            resolution_notes=payload.resolution_notes,
+            resolver=AlertResolverSummarySchema(
+                id=current_user.id,
+                email=current_user.email,
+                role=current_user.role,
+                full_name=resolver_name,
+            ),
+            audit_log_id=audit_entry.id,
+            updated_at=now,
+            ethical_disclaimer=ETHICAL_PEDAGOGICAL_DISCLAIMER,
+            created_at=alert.created_at,
+            intervention_history=intervention_history,
+        )
+
+    def get_alert_history(
+        self,
+        alert_id: UUID,
+        *,
+        current_user: User,
+    ) -> list[AlertInterventionAuditItemSchema]:
+        """Consulta a trilha cronológica de intervenções pedagógicas de um alerta acadêmico (BE-039)."""
+        alert = self._get_authorized_alert(alert_id, current_user=current_user)
+        audit_logs = self._repository.list_alert_audit_logs(alert.id)
+        return map_alert_audit_logs_to_schema(audit_logs)
+
 
 def get_risk_engine_service(
     repository: RiskEngineRepositoryDep,
+    audit_service: AuditServiceDep,
 ) -> RiskEngineService:
     """Provedor de injeção de dependência para RiskEngineService."""
-    return RiskEngineService(repository=repository)
+    return RiskEngineService(
+        repository=repository,
+        audit_service=audit_service,
+    )
 
 
 RiskEngineServiceDep = Annotated[
@@ -766,6 +970,7 @@ __all__ = [
     "DEFAULT_PASSING_SCORE",
     "LATE_TASKS_HIGH_THRESHOLD",
     "LATE_TASKS_MODERATE_THRESHOLD",
+    "RISK_ENGINE_ALERT_NOT_FOUND_MESSAGE",
     "RISK_ENGINE_CLASS_NOT_FOUND_MESSAGE",
     "RISK_ENGINE_MODULE_NOT_FOUND_MESSAGE",
     "RISK_ENGINE_TEACHER_FORBIDDEN_MESSAGE",
@@ -774,4 +979,5 @@ __all__ = [
     "StudentRiskMetricsInput",
     "evaluate_student_risk_rules",
     "get_risk_engine_service",
+    "map_alert_audit_logs_to_schema",
 ]

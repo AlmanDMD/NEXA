@@ -134,6 +134,7 @@ from app.schemas.course import (
     PositiveHoursInt,
 )
 from app.schemas.dashboard import (
+    AlertInterventionAuditItemSchema,
     DashboardStudent360SummaryItemSchema,
     DashboardStudentProfileSchema,
     ModuleDashboardPerformanceSchema,
@@ -141,6 +142,7 @@ from app.schemas.dashboard import (
     Student360ParamsDep,
     Student360QueryParams,
     StudentActiveAlertItemSchema,
+    StudentAlertHistoryItemSchema,
     StudentCompetencyRadarItemSchema,
     StudentMilestoneTimelineItemSchema,
     StudentModuleProgressItemSchema,
@@ -229,7 +231,10 @@ from app.schemas.practical_task import (
     validate_technical_feedback_pt,
 )
 from app.schemas.risk_engine import (
+    AcademicAlertResolutionResponseSchema,
+    AcademicAlertResolveRequestSchema,
     AcademicAlertResponseSchema,
+    AlertResolverSummarySchema,
     AtRiskAlertModuleSummarySchema,
     AtRiskStudentAlertItemSchema,
     AtRiskStudentCurrentMetricsSchema,
@@ -239,6 +244,8 @@ from app.schemas.risk_engine import (
     ETHICAL_PEDAGOGICAL_DISCLAIMER,
     RiskRuleEvaluationItemSchema,
     StudentRiskEvaluationResultSchema,
+    validate_alert_resolution_notes_pt,
+    validate_alert_resolution_status_pt,
 )
 from app.schemas.self_assessment import (
     ClassSelfAssessmentFormsListResponseSchema,
@@ -329,6 +336,8 @@ from app.schemas.validators import (
 
 __all__ = [
     "AbsentHoursInt",
+    "AcademicAlertResolutionResponseSchema",
+    "AcademicAlertResolveRequestSchema",
     "AcademicAlertResponseSchema",
     "AcademicAssessmentCreateSchema",
     "AcademicAssessmentListParamsDep",
@@ -344,6 +353,8 @@ __all__ = [
     "AcademicPeriodStr",
     "AcademicStandingStatus",
     "AlertCategory",
+    "AlertInterventionAuditItemSchema",
+    "AlertResolverSummarySchema",
     "AlertStatus",
     "AssessmentMaxGradeDecimal",
     "AssessmentTitleStr",
@@ -503,6 +514,7 @@ __all__ = [
     "Student360ParamsDep",
     "Student360QueryParams",
     "StudentActiveAlertItemSchema",
+    "StudentAlertHistoryItemSchema",
     "StudentAttendanceQueryParams",
     "StudentAttendanceQueryParamsDep",
     "StudentAttendanceSummaryStudentSchema",
@@ -575,6 +587,8 @@ __all__ = [
     "sanitize_text",
     "validate_absent_hours_pt",
     "validate_academic_period_pt",
+    "validate_alert_resolution_notes_pt",
+    "validate_alert_resolution_status_pt",
     "validate_assessment_max_grade_pt",
     "validate_assessment_title_pt",
     "validate_assessment_weight_pt",

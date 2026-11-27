@@ -17,6 +17,7 @@ from app.models.academic_alert import (
 )
 from app.models.academic_assessment import AcademicAssessment
 from app.models.academic_class import AcademicClass
+from app.models.audit_log import AuditLog
 from app.models.class_lesson import (
     VW_MODULE_ATTENDANCE_RISK_CREATE_SQL,
     VW_MODULE_ATTENDANCE_RISK_NAME,
@@ -332,9 +333,13 @@ class DashboardRepository:
         class_id: UUID | None = None,
     ) -> list[AcademicAlert]:
         """Lista alertas acadêmicos ativos de um estudante ordenados por severidade e data."""
-        stmt = select(AcademicAlert).where(
-            AcademicAlert.student_id == student_id,
-            AcademicAlert.status == AlertStatus.ACTIVE,
+        stmt = (
+            select(AcademicAlert)
+            .options(joinedload(AcademicAlert.resolver).selectinload(User.profile))
+            .where(
+                AcademicAlert.student_id == student_id,
+                AcademicAlert.status == AlertStatus.ACTIVE,
+            )
         )
         if class_id is not None:
             stmt = stmt.where(AcademicAlert.class_id == class_id)
@@ -346,7 +351,51 @@ class DashboardRepository:
             else_=4,
         )
         stmt = stmt.order_by(severity_order.asc(), AcademicAlert.created_at.desc())
-        return list(self._session.scalars(stmt).all())
+        return list(self._session.scalars(stmt).unique().all())
+
+    def list_student_alerts_history(
+        self,
+        student_id: UUID,
+        *,
+        class_id: UUID | None = None,
+    ) -> list[AcademicAlert]:
+        """Lista o histórico completo de alertas (ACTIVE, ACKNOWLEDGED e RESOLVED) do estudante para a Ficha 360° (BE-039)."""
+        stmt = (
+            select(AcademicAlert)
+            .options(joinedload(AcademicAlert.resolver).selectinload(User.profile))
+            .where(AcademicAlert.student_id == student_id)
+        )
+        if class_id is not None:
+            stmt = stmt.where(AcademicAlert.class_id == class_id)
+        stmt = stmt.order_by(AcademicAlert.created_at.desc(), AcademicAlert.id.asc())
+        return list(self._session.scalars(stmt).unique().all())
+
+    def list_audit_logs_for_alerts(
+        self,
+        alert_ids: Sequence[UUID],
+    ) -> dict[UUID, list[AuditLog]]:
+        """Busca em lote os logs de auditoria de intervenções pedagógicas para uma coleção de alertas (BE-039)."""
+        unique_ids = [str(aid) for aid in dict.fromkeys(alert_ids)]
+        if not unique_ids:
+            return {}
+        stmt = (
+            select(AuditLog)
+            .options(joinedload(AuditLog.user).selectinload(User.profile))
+            .where(
+                AuditLog.entity == "academic_alerts",
+                AuditLog.entity_id.in_(unique_ids),
+            )
+            .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        )
+        logs = list(self._session.scalars(stmt).unique().all())
+        grouped: dict[UUID, list[AuditLog]] = {}
+        for entry in logs:
+            try:
+                aid = UUID(entry.entity_id)
+            except ValueError:
+                continue
+            grouped.setdefault(aid, []).append(entry)
+        return grouped
 
     def list_student_milestones(
         self,

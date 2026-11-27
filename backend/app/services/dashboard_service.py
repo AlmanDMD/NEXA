@@ -29,6 +29,7 @@ from app.schemas.dashboard import (
     Student360OverviewResponseSchema,
     Student360QueryParams,
     StudentActiveAlertItemSchema,
+    StudentAlertHistoryItemSchema,
     StudentCompetencyRadarItemSchema,
     StudentMilestoneTimelineItemSchema,
     StudentModuleProgressItemSchema,
@@ -57,6 +58,7 @@ from app.services.academic_assessment_service import (
 )
 from app.services.class_lesson_service import compute_attendance_margin_metrics
 from app.services.practical_task_service import PracticalTaskService
+from app.services.risk_engine_service import map_alert_audit_logs_to_schema
 
 DASHBOARD_CLASS_NOT_FOUND_MESSAGE: Final[str] = "Turma acadêmica não encontrada."
 DASHBOARD_SUBJECT_NOT_FOUND_MESSAGE: Final[str] = "Disciplina técnica não encontrada."
@@ -587,6 +589,7 @@ class DashboardService:
                 competencies=[],
                 practical_submissions=[],
                 active_alerts=[],
+                alerts_history=[],
             )
 
         primary_enrollment = enrollments[0]
@@ -658,6 +661,13 @@ class DashboardService:
         active_alerts_orm = self._repository.list_student_active_alerts(
             student.id,
             class_id=academic_class.id,
+        )
+        all_alerts_orm = self._repository.list_student_alerts_history(
+            student.id,
+            class_id=academic_class.id,
+        )
+        audit_by_alert = self._repository.list_audit_logs_for_alerts(
+            [a.id for a in all_alerts_orm]
         )
 
         mod_grades: dict[UUID, list[tuple[Decimal, Decimal]]] = {}
@@ -854,9 +864,41 @@ class DashboardService:
                 explainable_reason=alert.explainable_reason,
                 metric_snapshot=alert.metric_snapshot,
                 status=alert.status,
+                resolved_by=alert.resolved_by,
+                resolved_by_name=(
+                    alert.resolver.profile.full_name
+                    if alert.resolver is not None and alert.resolver.profile is not None
+                    else (alert.resolver.email if alert.resolver is not None else None)
+                ),
+                resolution_notes=alert.resolution_notes,
                 created_at=alert.created_at,
             )
             for alert in active_alerts_orm
+        ]
+
+        alerts_history_schemas = [
+            StudentAlertHistoryItemSchema(
+                id=alert.id,
+                class_id=alert.class_id,
+                module_id=alert.module_id,
+                risk_level=alert.risk_level,
+                alert_category=alert.alert_category,
+                explainable_reason=alert.explainable_reason,
+                metric_snapshot=alert.metric_snapshot,
+                status=alert.status,
+                resolved_by=alert.resolved_by,
+                resolved_by_name=(
+                    alert.resolver.profile.full_name
+                    if alert.resolver is not None and alert.resolver.profile is not None
+                    else (alert.resolver.email if alert.resolver is not None else None)
+                ),
+                resolution_notes=alert.resolution_notes,
+                created_at=alert.created_at,
+                interventions=map_alert_audit_logs_to_schema(
+                    audit_by_alert.get(alert.id, [])
+                ),
+            )
+            for alert in all_alerts_orm
         ]
 
         return Student360OverviewResponseSchema(
@@ -873,6 +915,7 @@ class DashboardService:
             competencies=competencies_radar,
             practical_submissions=practical_submissions_schemas,
             active_alerts=active_alerts_schemas,
+            alerts_history=alerts_history_schemas,
         )
 
     def get_student_portal_dashboard(

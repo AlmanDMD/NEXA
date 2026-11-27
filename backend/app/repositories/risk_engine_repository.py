@@ -17,6 +17,7 @@ from app.models.academic_alert import (
     vw_student_360_performance_table,
 )
 from app.models.academic_class import AcademicClass
+from app.models.audit_log import AuditLog
 from app.models.enrollment import Enrollment
 from app.models.learning_module import LearningModule
 from app.models.subject import Subject
@@ -324,6 +325,49 @@ class RiskEngineRepository:
         stmt = select(vw).where(vw.c.enrollment_id.in_(target_ids))
         rows = self._session.execute(stmt).mappings().all()
         return {UUID(str(row["enrollment_id"])): dict(row) for row in rows}
+
+    def get_alert_by_id(self, alert_id: UUID) -> AcademicAlert | None:
+        """Busca alerta acadêmico pelo UUID carregando estudante, turma, módulo e responsável pela resolução (BE-039)."""
+        stmt = (
+            select(AcademicAlert)
+            .options(
+                joinedload(AcademicAlert.student).selectinload(User.profile),
+                joinedload(AcademicAlert.academic_class),
+                joinedload(AcademicAlert.module).joinedload(LearningModule.subject),
+                joinedload(AcademicAlert.resolver).selectinload(User.profile),
+            )
+            .where(AcademicAlert.id == alert_id)
+        )
+        return self._session.scalar(stmt)
+
+    def update_alert_resolution(
+        self,
+        alert: AcademicAlert,
+        *,
+        status: AlertStatus,
+        resolved_by: UUID,
+        resolution_notes: str,
+    ) -> AcademicAlert:
+        """Atualiza status, resolved_by e resolution_notes de um alerta acadêmico sem efetuar commit imediato (BE-039)."""
+        alert.status = status
+        alert.resolved_by = resolved_by
+        alert.resolution_notes = resolution_notes
+        self._session.add(alert)
+        self._session.flush()
+        return alert
+
+    def list_alert_audit_logs(self, alert_id: UUID) -> list[AuditLog]:
+        """Lista a trilha cronológica de intervenções registradas em audit_logs para um alerta acadêmico (BE-039)."""
+        stmt = (
+            select(AuditLog)
+            .options(joinedload(AuditLog.user).selectinload(User.profile))
+            .where(
+                AuditLog.entity == "academic_alerts",
+                AuditLog.entity_id == str(alert_id),
+            )
+            .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        )
+        return list(self._session.scalars(stmt).unique().all())
 
 
 def get_risk_engine_repository(session: DbSessionDep) -> RiskEngineRepository:
