@@ -23,10 +23,12 @@ from app.models.self_assessment import (
     StudentSelfAssessment,
 )
 from app.models.user import User
+from app.repositories.diagnostic_repository import DiagnosticRepository
 from app.repositories.self_assessment_repository import (
     SelfAssessmentRepository,
     SelfAssessmentRepositoryDep,
 )
+from app.services.diagnostic_service import DiagnosticService
 from app.schemas.class_lesson import (
     LessonModuleSummarySchema,
     LessonSubjectSummarySchema,
@@ -750,67 +752,17 @@ class SelfAssessmentService:
             )
         )
 
-        # Dispara o algoritmo de cruzamento diagnóstico (BE-037) para as competências respondidas
+        # Dispara o algoritmo de cruzamento diagnóstico (BE-037) via DiagnosticService (vw_self_eval_discrepancy)
         submitted_comp_ids = [item.competency_id for item in payload.responses]
-        evidence_stats_by_comp = self._repository.get_student_skill_evidence_stats(
-            student_id=current_user.id,
-            competency_ids=submitted_comp_ids,
+        diagnostic_service = DiagnosticService(
+            repository=DiagnosticRepository(session=self._repository.session)
         )
-
-        diagnostic_tuples: list[
-            tuple[
-                UUID,
-                Decimal,
-                Decimal,
-                Decimal,
-                DiagnosticType,
-                str,
-                str,
-                str,
-            ]
-        ] = []
-        for item in payload.responses:
-            comp = module_competencies_by_id[item.competency_id]
-            avg_verified, evidence_count = evidence_stats_by_comp.get(
-                item.competency_id,
-                (None, 0),
-            )
-            (
-                self_lvl,
-                teacher_lvl,
-                gap,
-                diag_type,
-                explanation_text,
-                limitations_note,
-                recommended_action,
-            ) = compute_competency_explainable_diagnostic(
-                competency=comp,
-                module_title=form.module.title,
-                perceived_level=item.perceived_level,
-                confidence_score=item.confidence_score,
-                difficulty_notes=item.difficulty_notes,
-                avg_verified_level=avg_verified,
-                evidence_count=evidence_count,
-            )
-            diagnostic_tuples.append(
-                (
-                    item.competency_id,
-                    self_lvl,
-                    teacher_lvl,
-                    gap,
-                    diag_type,
-                    explanation_text,
-                    limitations_note,
-                    recommended_action,
-                )
-            )
-
-        persisted_diagnostics = self._repository.upsert_explainable_diagnostics(
-            student_id=current_user.id,
+        diagnostics_schemas = diagnostic_service.run_diagnostic_crossover(
             class_id=form.class_id,
             module_id=form.module_id,
-            diagnostic_items=diagnostic_tuples,
-            generated_at=now_utc,
+            form_id=form.id,
+            student_id=current_user.id,
+            competency_ids=submitted_comp_ids,
         )
 
         all_student_responses = self._repository.list_student_responses_for_form(
@@ -875,39 +827,6 @@ class SelfAssessmentService:
             message=help_message,
             flagged_competencies=flagged_for_help,
         )
-
-        diagnostics_schemas: list[ExplainableDiagnosticItemResponseSchema] = []
-        for diag in persisted_diagnostics:
-            comp = (
-                module_competencies_by_id.get(diag.competency_id)
-                if diag.competency_id is not None
-                else None
-            )
-            _, ev_count = (
-                evidence_stats_by_comp.get(diag.competency_id, (None, 0))
-                if diag.competency_id is not None
-                else (None, 0)
-            )
-            diagnostics_schemas.append(
-                ExplainableDiagnosticItemResponseSchema(
-                    id=diag.id,
-                    student_id=diag.student_id,
-                    class_id=diag.class_id,
-                    module_id=diag.module_id,
-                    competency_id=diag.competency_id,
-                    competency_code=comp.code if comp is not None else None,
-                    competency_title=comp.title if comp is not None else None,
-                    self_perceived_level=diag.self_perceived_level,
-                    teacher_verified_level=diag.teacher_verified_level,
-                    discrepancy_gap=diag.discrepancy_gap,
-                    evidence_count=ev_count,
-                    diagnostic_type=diag.diagnostic_type,
-                    explanation_text=diag.explanation_text,
-                    limitations_note=diag.limitations_note,
-                    recommended_action=diag.recommended_action,
-                    generated_at=_ensure_utc(diag.generated_at),
-                )
-            )
 
         logger.bind(
             form_id=str(form.id),

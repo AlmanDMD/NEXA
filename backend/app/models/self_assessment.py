@@ -1,8 +1,8 @@
-"""Modelos ORM SQLAlchemy 2.0 para Formulários de Autoavaliação (DB-031), Respostas do Estudante (DB-032) e Diagnósticos Explicáveis (DB-035)."""
+"""Modelos ORM SQLAlchemy 2.0 para Formulários de Autoavaliação (DB-031), Respostas do Estudante (DB-032), Diagnósticos Explicáveis (DB-035) e View de Discrepância (vw_self_eval_discrepancy - DB-038)."""
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
 
 from sqlalchemy import (
@@ -18,9 +18,14 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    column,
+    event,
     func,
+    inspect,
+    table,
     text,
 )
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.models.base import Base, UUIDPrimaryKeyMixin, _utc_now
@@ -461,8 +466,134 @@ class ExplainableDiagnostic(Base, UUIDPrimaryKeyMixin):
         return normalized
 
 
+VW_SELF_EVAL_DISCREPANCY_NAME: Final[str] = "vw_self_eval_discrepancy"
+
+VW_SELF_EVAL_DISCREPANCY_DROP_SQL: Final[str] = (
+    f"DROP VIEW IF EXISTS {VW_SELF_EVAL_DISCREPANCY_NAME}"
+)
+
+VW_SELF_EVAL_DISCREPANCY_CREATE_SQL: Final[str] = f"""
+CREATE VIEW {VW_SELF_EVAL_DISCREPANCY_NAME} AS
+SELECT
+    ssa.id AS self_assessment_id,
+    ssa.form_id AS form_id,
+    saf.class_id AS class_id,
+    saf.module_id AS module_id,
+    lm.title AS module_title,
+    ssa.student_id AS student_id,
+    up.full_name AS student_name,
+    ssa.competency_id AS competency_id,
+    cp.code AS competency_code,
+    cp.title AS competency_title,
+    cp.category AS competency_category,
+    ROUND(CAST(ssa.perceived_level AS NUMERIC), 2) AS perceived_level,
+    ssa.confidence_score AS confidence_score,
+    ea.avg_verified_level AS avg_verified_level,
+    COALESCE(ea.evidence_count, 0) AS evidence_count,
+    CASE
+        WHEN COALESCE(ea.evidence_count, 0) = 0 THEN NULL
+        ELSE ROUND(CAST(ssa.perceived_level AS NUMERIC) - ea.avg_verified_level, 2)
+    END AS discrepancy_delta,
+    CASE
+        WHEN COALESCE(ea.evidence_count, 0) = 0 THEN 'INSUFFICIENT_EVIDENCE'
+        WHEN (CAST(ssa.perceived_level AS NUMERIC) - ea.avg_verified_level) >= 1.50 THEN 'OVERCONFIDENCE_RISK'
+        WHEN (CAST(ssa.perceived_level AS NUMERIC) - ea.avg_verified_level) <= -1.50 THEN 'UNDERCONFIDENCE_SUPPORT'
+        ELSE 'ALIGNED'
+    END AS diagnostic_classification,
+    CASE
+        WHEN COALESCE(ea.evidence_count, 0) = 0
+             OR ABS(CAST(ssa.perceived_level AS NUMERIC) - ea.avg_verified_level) >= 1.50
+        THEN 1
+        ELSE 0
+    END AS requires_pedagogical_review,
+    ssa.difficulty_notes AS difficulty_notes,
+    ssa.submitted_at AS submitted_at,
+    ea.last_evidence_at AS last_evidence_at
+FROM student_self_assessments ssa
+INNER JOIN self_assessment_forms saf ON saf.id = ssa.form_id
+INNER JOIN learning_modules lm ON lm.id = saf.module_id
+INNER JOIN competencies cp ON cp.id = ssa.competency_id
+LEFT JOIN user_profiles up ON up.user_id = ssa.student_id
+LEFT JOIN (
+    SELECT
+        se.student_id AS student_id,
+        se.competency_id AS competency_id,
+        ROUND(AVG(CAST(se.verified_level AS NUMERIC)), 2) AS avg_verified_level,
+        COUNT(se.id) AS evidence_count,
+        MAX(se.recorded_at) AS last_evidence_at
+    FROM skill_evidences se
+    GROUP BY se.student_id, se.competency_id
+) ea
+    ON ea.student_id = ssa.student_id
+   AND ea.competency_id = ssa.competency_id
+"""
+
+vw_self_eval_discrepancy_table = table(
+    VW_SELF_EVAL_DISCREPANCY_NAME,
+    column("self_assessment_id", Uuid(as_uuid=True)),
+    column("form_id", Uuid(as_uuid=True)),
+    column("class_id", Uuid(as_uuid=True)),
+    column("module_id", Uuid(as_uuid=True)),
+    column("module_title", String),
+    column("student_id", Uuid(as_uuid=True)),
+    column("student_name", String),
+    column("competency_id", Uuid(as_uuid=True)),
+    column("competency_code", String),
+    column("competency_title", String),
+    column("competency_category", String),
+    column("perceived_level", Numeric(3, 2)),
+    column("confidence_score", Integer),
+    column("avg_verified_level", Numeric(3, 2)),
+    column("evidence_count", Integer),
+    column("discrepancy_delta", Numeric(3, 2)),
+    column("diagnostic_classification", String),
+    column("requires_pedagogical_review", Boolean),
+    column("difficulty_notes", Text),
+    column("submitted_at", DateTime(timezone=True)),
+    column("last_evidence_at", DateTime(timezone=True)),
+)
+
+_VW_DISCREPANCY_REQUIRED_TABLES: Final[frozenset[str]] = frozenset(
+    {
+        "student_self_assessments",
+        "self_assessment_forms",
+        "learning_modules",
+        "competencies",
+        "user_profiles",
+        "skill_evidences",
+    }
+)
+
+
+@event.listens_for(Base.metadata, "after_create")
+def _create_vw_self_eval_discrepancy(
+    _target: Any,
+    connection: Connection,
+    **_kw: Any,
+) -> None:
+    """Cria a view analítica vw_self_eval_discrepancy (DB-038) após a criação das tabelas base."""
+    existing_tables = set(inspect(connection).get_table_names())
+    if _VW_DISCREPANCY_REQUIRED_TABLES.issubset(existing_tables):
+        connection.execute(text(VW_SELF_EVAL_DISCREPANCY_DROP_SQL))
+        connection.execute(text(VW_SELF_EVAL_DISCREPANCY_CREATE_SQL))
+
+
+@event.listens_for(Base.metadata, "before_drop")
+def _drop_vw_self_eval_discrepancy(
+    _target: Any,
+    connection: Connection,
+    **_kw: Any,
+) -> None:
+    """Remove a view vw_self_eval_discrepancy antes do drop das tabelas base."""
+    connection.execute(text(VW_SELF_EVAL_DISCREPANCY_DROP_SQL))
+
+
 __all__ = [
     "ExplainableDiagnostic",
     "SelfAssessmentForm",
     "StudentSelfAssessment",
+    "VW_SELF_EVAL_DISCREPANCY_CREATE_SQL",
+    "VW_SELF_EVAL_DISCREPANCY_DROP_SQL",
+    "VW_SELF_EVAL_DISCREPANCY_NAME",
+    "vw_self_eval_discrepancy_table",
 ]
