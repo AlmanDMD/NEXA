@@ -132,6 +132,23 @@ class AnnouncementPriority(StrEnum):
     URGENT = "URGENT"
 
 
+class HelpRequestCategory(StrEnum):
+    """Categoria da solicitação confidencial de apoio pedagógico — 'help_request_category_enum' (DB-042)."""
+
+    TECHNICAL_DOUBT = "TECHNICAL_DOUBT"
+    PRACTICAL_DIFFICULTY = "PRACTICAL_DIFFICULTY"
+    PERSONAL_PEDAGOGICAL = "PERSONAL_PEDAGOGICAL"
+
+
+class HelpRequestStatus(StrEnum):
+    """Ciclo de vida da solicitação de apoio confidencial — 'help_request_status_enum' (DB-042)."""
+
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    RESOLVED = "RESOLVED"
+    CLOSED = "CLOSED"
+
+
 __all__ = [
     "AcademicStandingStatus",
     "AlertCategory",
@@ -143,6 +160,8 @@ __all__ = [
     "CompetencyCategory",
     "DiagnosticType",
     "EnrollmentStatus",
+    "HelpRequestCategory",
+    "HelpRequestStatus",
     "MilestoneType",
     "RiskLevel",
     "Shift",

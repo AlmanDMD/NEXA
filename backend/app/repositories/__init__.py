@@ -55,6 +55,11 @@ from app.repositories.enrollment_repository import (
     EnrollmentRepositoryDep,
     get_enrollment_repository,
 )
+from app.repositories.help_request_repository import (
+    HelpRequestRepository,
+    HelpRequestRepositoryDep,
+    get_help_request_repository,
+)
 from app.repositories.learning_module_repository import (
     LearningModuleRepository,
     LearningModuleRepositoryDep,
@@ -109,6 +114,8 @@ __all__ = [
     "DiagnosticRepositoryDep",
     "EnrollmentRepository",
     "EnrollmentRepositoryDep",
+    "HelpRequestRepository",
+    "HelpRequestRepositoryDep",
     "LearningModuleRepository",
     "LearningModuleRepositoryDep",
     "PracticalTaskRepository",
@@ -132,6 +139,7 @@ __all__ = [
     "get_dashboard_repository",
     "get_diagnostic_repository",
     "get_enrollment_repository",
+    "get_help_request_repository",
     "get_learning_module_repository",
     "get_practical_task_repository",
     "get_risk_engine_repository",
