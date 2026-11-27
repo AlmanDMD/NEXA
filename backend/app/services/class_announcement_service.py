@@ -1,6 +1,7 @@
-"""Serviço de domínio para Publicação, Edição, Fixação e Exclusão de Avisos no Mural da Turma (BE-041)."""
+"""Serviço de domínio para Publicação, Edição, Fixação, Consulta e Exclusão de Avisos no Mural da Turma (BE-041 / BE-042)."""
 
 from datetime import datetime, timezone
+import math
 from typing import Annotated, Final
 from uuid import UUID
 
@@ -23,6 +24,8 @@ from app.schemas.class_announcement import (
     AnnouncementAuthorSummarySchema,
     AnnouncementSubjectSummarySchema,
     ClassAnnouncementCreateSchema,
+    ClassAnnouncementListQueryParams,
+    ClassAnnouncementPaginatedResponseSchema,
     ClassAnnouncementResponseSchema,
     ClassAnnouncementUpdateSchema,
 )
@@ -48,6 +51,9 @@ ANNOUNCEMENT_TEACHER_AUTHOR_FORBIDDEN_MESSAGE: Final[str] = (
 )
 ANNOUNCEMENT_INVALID_EXPIRATION_MESSAGE: Final[str] = (
     "A data/hora de expiração (expires_at) deve ser estritamente posterior à data de publicação."
+)
+ANNOUNCEMENT_STUDENT_CLASS_FORBIDDEN_MESSAGE: Final[str] = (
+    "Acesso não autorizado: estudante não possui matrícula ativa nesta turma."
 )
 
 
@@ -305,6 +311,83 @@ class ClassAnnouncementService:
             actor_role=current_user.role.value,
         ).info("Aviso oficial removido do mural da turma (BE-041).")
 
+    def list_announcements(
+        self,
+        params: ClassAnnouncementListQueryParams,
+        *,
+        current_user: User,
+    ) -> ClassAnnouncementPaginatedResponseSchema:
+        """Consulta comunicados ativos do mural ordenados por is_pinned DESC e published_at DESC com isolamento por turma (BE-042)."""
+        if params.class_id is not None:
+            if self._repository.get_class_by_id(params.class_id) is None:
+                raise NotFoundException(message=ANNOUNCEMENT_CLASS_NOT_FOUND_MESSAGE)
+
+        if params.subject_id is not None:
+            if self._repository.get_subject_by_id(params.subject_id) is None:
+                raise NotFoundException(message=ANNOUNCEMENT_SUBJECT_NOT_FOUND_MESSAGE)
+
+        allowed_class_ids: list[UUID] | None = None
+        if current_user.role == UserRole.STUDENT:
+            enrolled_class_ids = self._repository.list_student_enrolled_class_ids(
+                current_user.id
+            )
+            if (
+                params.class_id is not None
+                and params.class_id not in enrolled_class_ids
+            ):
+                raise ForbiddenException(
+                    message=ANNOUNCEMENT_STUDENT_CLASS_FORBIDDEN_MESSAGE
+                )
+            if not enrolled_class_ids:
+                return ClassAnnouncementPaginatedResponseSchema(
+                    data=[],
+                    total=0,
+                    page=params.page,
+                    limit=params.limit,
+                    total_pages=0,
+                )
+            allowed_class_ids = list(enrolled_class_ids)
+
+        elif current_user.role == UserRole.TEACHER:
+            assigned_class_ids = self._repository.list_teacher_assigned_class_ids(
+                current_user.id
+            )
+            if (
+                params.class_id is not None
+                and params.class_id not in assigned_class_ids
+            ):
+                raise ForbiddenException(
+                    message=ANNOUNCEMENT_TEACHER_CLASS_FORBIDDEN_MESSAGE
+                )
+            if not assigned_class_ids:
+                return ClassAnnouncementPaginatedResponseSchema(
+                    data=[],
+                    total=0,
+                    page=params.page,
+                    limit=params.limit,
+                    total_pages=0,
+                )
+            allowed_class_ids = list(assigned_class_ids)
+
+        items, total = self._repository.list_active_announcements(
+            now_utc=_utc_now(),
+            page=params.page,
+            limit=params.limit,
+            class_id=params.class_id,
+            allowed_class_ids=allowed_class_ids,
+            subject_id=params.subject_id,
+            priority=params.priority,
+        )
+        total_pages = math.ceil(total / params.limit) if total > 0 else 0
+
+        return ClassAnnouncementPaginatedResponseSchema(
+            data=[self._to_response(item) for item in items],
+            total=total,
+            page=params.page,
+            limit=params.limit,
+            total_pages=total_pages,
+        )
+
 
 def get_class_announcement_service(
     repository: ClassAnnouncementRepositoryDep,
@@ -322,6 +405,7 @@ __all__ = [
     "ANNOUNCEMENT_CLASS_NOT_FOUND_MESSAGE",
     "ANNOUNCEMENT_INVALID_EXPIRATION_MESSAGE",
     "ANNOUNCEMENT_NOT_FOUND_MESSAGE",
+    "ANNOUNCEMENT_STUDENT_CLASS_FORBIDDEN_MESSAGE",
     "ANNOUNCEMENT_SUBJECT_COURSE_MISMATCH_MESSAGE",
     "ANNOUNCEMENT_SUBJECT_NOT_FOUND_MESSAGE",
     "ANNOUNCEMENT_TEACHER_AUTHOR_FORBIDDEN_MESSAGE",

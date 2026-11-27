@@ -1,4 +1,4 @@
-"""Router para Publicação, Edição, Fixação e Exclusão de Avisos no Mural da Turma (EPIC-08 / BE-041)."""
+"""Router para Publicação, Edição, Fixação, Consulta e Exclusão de Avisos no Mural da Turma (EPIC-08 / BE-041 / BE-042)."""
 
 from typing import Annotated
 
@@ -9,6 +9,8 @@ from app.models.user import User
 from app.schemas.base import UUIDPathParam
 from app.schemas.class_announcement import (
     ClassAnnouncementCreateSchema,
+    ClassAnnouncementListParamsDep,
+    ClassAnnouncementPaginatedResponseSchema,
     ClassAnnouncementResponseSchema,
     ClassAnnouncementUpdateSchema,
 )
@@ -19,6 +21,34 @@ router = APIRouter(
     prefix="/api/v1/announcements",
     tags=["Communication"],
 )
+
+
+@router.get(
+    "",
+    response_model=ClassAnnouncementPaginatedResponseSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar mural de avisos das turmas com filtros e paginação",
+)
+async def list_class_announcements(
+    params: ClassAnnouncementListParamsDep,
+    announcement_service: ClassAnnouncementServiceDep,
+    current_user: Annotated[
+        User,
+        Depends(
+            require_role(
+                UserRole.ADMIN,
+                UserRole.COORDINATOR,
+                UserRole.TEACHER,
+                UserRole.STUDENT,
+            )
+        ),
+    ],
+) -> ClassAnnouncementPaginatedResponseSchema:
+    """Retorna avisos não expirados das turmas permitidas ordenados por is_pinned DESC e published_at DESC (BE-042)."""
+    return announcement_service.list_announcements(
+        params,
+        current_user=current_user,
+    )
 
 
 @router.post(
