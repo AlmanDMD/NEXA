@@ -17,6 +17,7 @@ from app.routers.competencies import router as competencies_router
 from app.routers.courses import router as courses_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.enrollments import router as enrollments_router
+from app.routers.gamification import router as gamification_router
 from app.routers.health import router as health_router
 from app.routers.help_requests import router as help_requests_router
 from app.routers.learning_modules import router as learning_modules_router
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
     application.include_router(announcements_router)
     application.include_router(help_requests_router)
     application.include_router(pedagogical_notes_router)
+    application.include_router(gamification_router)
 
     return application
 

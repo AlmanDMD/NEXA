@@ -153,6 +153,13 @@ from app.services.enrollment_service import (
     EnrollmentServiceDep,
     get_enrollment_service,
 )
+from app.services.gamification_service import (
+    GamificationService,
+    GamificationServiceDep,
+    SKILL_LEVEL_TIERS,
+    compute_skill_level_from_xp,
+    get_gamification_service,
+)
 from app.services.health_service import (
     HealthService,
     HealthServiceDep,
@@ -379,6 +386,8 @@ __all__ = [
     "ENROLLMENT_STUDENT_NOT_FOUND_MESSAGE",
     "EnrollmentService",
     "EnrollmentServiceDep",
+    "GamificationService",
+    "GamificationServiceDep",
     "GRADE_EXCEEDS_MAX_GRADE_MESSAGE",
     "GRADE_INACTIVE_ENROLLMENT_MESSAGE",
     "GRADE_STUDENT_NOT_ENROLLED_MESSAGE",
@@ -477,6 +486,7 @@ __all__ = [
     "SELF_ASSESSMENT_TEACHER_FORBIDDEN_MESSAGE",
     "SelfAssessmentService",
     "SelfAssessmentServiceDep",
+    "SKILL_LEVEL_TIERS",
     "STUDENT_ATTENDANCE_IDOR_FORBIDDEN_MESSAGE",
     "STUDENT_ATTENDANCE_TEACHER_FORBIDDEN_MESSAGE",
     "STUDENT_ENROLLMENT_NOT_FOUND_MESSAGE",
@@ -511,6 +521,7 @@ __all__ = [
     "compute_attendance_margin_metrics",
     "compute_competency_explainable_diagnostic",
     "compute_senai_effective_grade",
+    "compute_skill_level_from_xp",
     "evaluate_attendance_risk_level",
     "evaluate_competency_discrepancy",
     "evaluate_student_risk_rules",
@@ -525,6 +536,7 @@ __all__ = [
     "get_dashboard_service",
     "get_diagnostic_service",
     "get_enrollment_service",
+    "get_gamification_service",
     "get_health_service",
     "get_help_request_service",
     "get_learning_module_service",
