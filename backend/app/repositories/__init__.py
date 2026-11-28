@@ -55,6 +55,12 @@ from app.repositories.enrollment_repository import (
     EnrollmentRepositoryDep,
     get_enrollment_repository,
 )
+from app.repositories.gamification_repository import (
+    DEFAULT_SENAI_BADGES_CATALOG,
+    GamificationRepository,
+    GamificationRepositoryDep,
+    get_gamification_repository,
+)
 from app.repositories.help_request_repository import (
     HelpRequestRepository,
     HelpRequestRepositoryDep,
@@ -115,10 +121,13 @@ __all__ = [
     "CourseRepositoryDep",
     "DashboardRepository",
     "DashboardRepositoryDep",
+    "DEFAULT_SENAI_BADGES_CATALOG",
     "DiagnosticRepository",
     "DiagnosticRepositoryDep",
     "EnrollmentRepository",
     "EnrollmentRepositoryDep",
+    "GamificationRepository",
+    "GamificationRepositoryDep",
     "HelpRequestRepository",
     "HelpRequestRepositoryDep",
     "LearningModuleRepository",
@@ -146,6 +155,7 @@ __all__ = [
     "get_dashboard_repository",
     "get_diagnostic_repository",
     "get_enrollment_repository",
+    "get_gamification_repository",
     "get_help_request_repository",
     "get_learning_module_repository",
     "get_pedagogical_note_repository",

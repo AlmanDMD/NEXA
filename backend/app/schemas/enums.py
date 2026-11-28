@@ -166,6 +166,15 @@ class NoteCategory(StrEnum):
     ACCOMMODATION = "ACCOMMODATION"
 
 
+class SkillLevel(StrEnum):
+    """Níveis de evolução de habilidade técnica na gamificação pedagógica transparente (BE-046 / BE-047)."""
+
+    BEGINNER = "BEGINNER"
+    PRACTITIONER = "PRACTITIONER"
+    PROFICIENT = "PROFICIENT"
+    SPECIALIST = "SPECIALIST"
+
+
 __all__ = [
     "AcademicStandingStatus",
     "AlertCategory",
@@ -184,6 +193,7 @@ __all__ = [
     "NoteVisibilityScope",
     "RiskLevel",
     "Shift",
+    "SkillLevel",
     "SubmissionStatus",
     "UserRole",
 ]

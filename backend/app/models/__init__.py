@@ -24,6 +24,7 @@ from app.models.class_lesson import (
 from app.models.competency import Competency
 from app.models.course import Course
 from app.models.enrollment import Enrollment
+from app.models.gamification import GamificationBadge, StudentAchievement
 from app.models.help_request import ChatMessage, HelpRequest
 from app.models.learning_module import LearningModule
 from app.models.module_competency import ModuleCompetency
@@ -64,6 +65,7 @@ __all__ = [
     "Course",
     "Enrollment",
     "ExplainableDiagnostic",
+    "GamificationBadge",
     "HelpRequest",
     "LearningModule",
     "ModuleCompetency",
@@ -71,6 +73,7 @@ __all__ = [
     "PracticalTask",
     "SelfAssessmentForm",
     "SkillEvidence",
+    "StudentAchievement",
     "StudentGrade",
     "StudentMilestoneHistory",
     "StudentSelfAssessment",
